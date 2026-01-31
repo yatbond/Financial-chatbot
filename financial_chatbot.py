@@ -88,10 +88,14 @@ def get_drive_service():
         else:
             # Check for Streamlit Cloud secrets first
             try:
+                # Debug: Show what secrets are available
+                st.write("Debug - Available secrets:", list(st.secrets.keys()))
+                
                 # Method 1: google_credentials as a JSON string
                 if 'google_credentials' in st.secrets:
                     import json as json_module
                     creds_json = st.secrets['google_credentials']
+                    st.write("Debug - google_credentials found")
                     if isinstance(creds_json, str):
                         creds_dict = json_module.loads(creds_json)
                     else:
@@ -109,6 +113,7 @@ def get_drive_service():
                 elif 'installed' in st.secrets or 'web' in st.secrets:
                     import json as json_module
                     creds_dict = {k: dict(v) if hasattr(v, 'keys') else v for k, v in st.secrets.items()}
+                    st.write("Debug - installed/web found")
                     creds_file = Path(tempfile.gettempdir()) / "credentials.json"
                     with open(creds_file, 'w') as f:
                         json_module.dump(creds_dict, f)
@@ -118,6 +123,7 @@ def get_drive_service():
                 else:
                     raise FileNotFoundError("No credentials in secrets")
             except Exception as secret_error:
+                st.write(f"Debug - Secret error: {secret_error}")
                 # Fall back to local credentials.json file
                 creds_file = Path(__file__).parent / "credentials.json"
                 if not creds_file.exists():
