@@ -174,15 +174,36 @@ def list_folders(service, parent_id=None, folder_name=None):
 
 
 def find_excel_files_in_month(service, month_folder_id):
-    """Find Excel files directly in month folder."""
+    """Find Excel files in month folder AND all subfolders."""
     try:
-        query = f"mimeType='application/vnd.google-apps.file' and name contains '.xlsx' and '{month_folder_id}' in parents"
-        results = service.files().list(
-            q=query,
+        # First, find Excel files directly in month folder
+        query_direct = f"mimeType='application/vnd.google-apps.file' and name contains '.xlsx' and '{month_folder_id}' in parents"
+        results_direct = service.files().list(
+            q=query_direct,
             fields="files(id, name, modifiedTime)"
         ).execute()
         
-        return results.get('files', [])
+        files_direct = results_direct.get('files', [])
+        
+        # Also find subfolders and search inside them
+        query_folders = f"mimeType='application/vnd.google-apps.folder' and '{month_folder_id}' in parents"
+        results_folders = service.files().list(
+            q=query_folders,
+            fields="files(id, name)"
+        ).execute()
+        
+        subfolders = results_folders.get('files', [])
+        
+        # Search each subfolder
+        for subfolder in subfolders:
+            query_sub = f"mimeType='application/vnd.google-apps.file' and name contains '.xlsx' and '{subfolder['id']}' in parents"
+            results_sub = service.files().list(
+                q=query_sub,
+                fields="files(id, name, modifiedTime)"
+            ).execute()
+            files_direct.extend(results_sub.get('files', []))
+        
+        return files_direct
     except HttpError as e:
         st.error(f"Error searching files: {e}")
         return []
