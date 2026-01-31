@@ -101,15 +101,23 @@ def get_drive_service():
                     else:
                         creds_dict = creds_json
                     
-                    import tempfile
-                    creds_file = Path(tempfile.gettempdir()) / "credentials.json"
-                    with open(creds_file, 'w') as f:
-                        json_module.dump(creds_dict, f)
-                    
-                    flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
-                    creds = flow.run_local_server(port=0)
+                    # Check if service account
+                    if creds_dict.get('type') == 'service_account':
+                        from google.oauth2 import service_account
+                        creds = service_account.Credentials.from_service_account_info(
+                            creds_dict, scopes=SCOPES
+                        )
+                    else:
+                        # Regular OAuth flow (needs browser - won't work on cloud)
+                        import tempfile
+                        creds_file = Path(tempfile.gettempdir()) / "credentials.json"
+                        with open(creds_file, 'w') as f:
+                            json_module.dump(creds_dict, f)
+                        
+                        flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
+                        creds = flow.run_local_server(port=0)
                 
-                # Method 2: 'installed' or 'web' keys directly
+                # Method 2: 'installed' or 'web' keys directly (OAuth)
                 elif 'installed' in st.secrets or 'web' in st.secrets:
                     import json as json_module
                     creds_dict = {k: dict(v) if hasattr(v, 'keys') else v for k, v in st.secrets.items()}
