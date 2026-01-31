@@ -1,6 +1,6 @@
 {
-  "buildCommand": "pip install -r requirements.txt",
+  "buildCommand": "pip install -r requirements.txt --break-system-packages",
   "devCommand": "streamlit run financial_chatbot.py",
-  "installCommand": "pip install pipenv && pipenv install",
+  "installCommand": "pip install -r requirements.txt --break-system-packages",
   "framework": null
 }
