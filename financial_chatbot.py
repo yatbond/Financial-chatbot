@@ -550,11 +550,11 @@ def main():
     button:hover {
         background-color: #2d5a8a !important;
     }
-    /* Selected button styling */
+    /* Selected button styling - white border */
     button[data-testid="baseButton-primary"][aria-pressed="true"],
     button[data-testid="baseButton-primary"].stButton > button[aria-pressed="true"] {
         background-color: #0d3a6e !important;
-        border: 2px solid #4fc3f7 !important;
+        border: 3px solid #ffffff !important;
         color: #ffffff !important;
         font-weight: bold !important;
     }
@@ -779,23 +779,43 @@ def main():
                 # Parse Financial Status sheet
                 df_financial = pd.read_excel(excel_file, sheet_name='Financial Status', header=None)
                 
+                # Debug: Show structure
+                st.write("Debug - Financial Status structure:")
+                for idx in range(10, min(18, len(df_financial))):
+                    col0 = str(df_financial.iloc[idx, 0])[:30] if pd.notna(df_financial.iloc[idx, 0]) else ""
+                    col2 = df_financial.iloc[idx, 2] if pd.notna(df_financial.iloc[idx, 2]) else ""
+                    col3 = df_financial.iloc[idx, 3] if pd.notna(df_financial.iloc[idx, 3]) else ""
+                    col5 = df_financial.iloc[idx, 5] if pd.notna(df_financial.iloc[idx, 5]) else ""
+                    st.write(f"Row {idx}: {col0} | Col2(1st WB)={col2} | Col3(B)={col3} | Col5(D=B+C)={col5}")
+                
                 # Extract the 3 key metrics from Financial Status
-                # Based on the structure, columns are:
-                # A=Item, B=Trade, C=1st Working Budget, D=B, E=Revision, F=D=B+C
+                # Based on the structure:
+                # Column C (2) = 1st Working Budget = Projection
+                # Column D (3) = B = Business Plan / WIP
+                # Column F (5) = D=B+C = Budget Revision / Cash Flow
                 gp_projection = 0
                 gp_wip = 0
                 gp_cash_flow = 0
                 
-                for idx in range(16, min(30, len(df_financial))):
+                for idx in range(16, min(40, len(df_financial))):
                     item_name = str(df_financial.iloc[idx, 0]).strip() if pd.notna(df_financial.iloc[idx, 0]) else ""
                     trade_name = str(df_financial.iloc[idx, 1]).strip() if pd.notna(df_financial.iloc[idx, 1]) else ""
-                    if 'gross profit' in item_name.lower() or 'gross profit' in trade_name.lower():
-                        # Get values from 1st Working Budget (col C=2), B (col D=3), D=B+C (col F=5)
-                        gp_projection = float(df_financial.iloc[idx, 2]) if pd.notna(df_financial.iloc[idx, 2]) and str(df_financial.iloc[idx, 2]).replace('.','').isdigit() else 0
-                        gp_wip = float(df_financial.iloc[idx, 3]) if pd.notna(df_financial.iloc[idx, 3]) and str(df_financial.iloc[idx, 3]).replace('.','').isdigit() else 0
-                        gp_cash_flow = float(df_financial.iloc[idx, 5]) if pd.notna(df_financial.iloc[idx, 5]) and str(df_financial.iloc[idx, 5]).replace('.','').isdigit() else 0
-                        st.write(f"Debug - Found at row {idx}: {item_name} | {trade_name}")
-                        st.write(f"Debug - Values: col2={df_financial.iloc[idx, 2]}, col3={df_financial.iloc[idx, 3]}, col5={df_financial.iloc[idx, 5]}")
+                    
+                    # Look for Gross Profit items (Trade column contains "Gross Profit")
+                    if 'gross profit' in trade_name.lower():
+                        # Column C = 1st Working Budget (Projection)
+                        col2_val = df_financial.iloc[idx, 2]
+                        gp_projection = float(col2_val) if pd.notna(col2_val) and str(col2_val).replace('.','').isdigit() else 0
+                        
+                        # Column D = B (Business Plan / WIP)
+                        col3_val = df_financial.iloc[idx, 3]
+                        gp_wip = float(col3_val) if pd.notna(col3_val) and str(col3_val).replace('.','').isdigit() else 0
+                        
+                        # Column F = D=B+C (Budget / Cash Flow)
+                        col5_val = df_financial.iloc[idx, 5]
+                        gp_cash_flow = float(col5_val) if pd.notna(col5_val) and str(col5_val).replace('.','').isdigit() else 0
+                        
+                        st.write(f"Debug - Found GP at row {idx}: {item_name} | {trade_name}")
                         break
                 
                 # Show 3 high-level metrics from Financial Status
@@ -896,9 +916,16 @@ def main():
                     
                     # Filter based on type
                     if type_key == "gp_bf":
-                        filtered = df_filtered[df_filtered['Trade'].str.contains('Gross Profit', case=False, na=False)]
+                        # Gross Profit before adjustment - exclude "after adjustment"
+                        filtered = df_filtered[
+                            df_filtered['Trade'].str.contains('Gross Profit', case=False, na=False) & 
+                            ~df_filtered['Trade'].str.contains('after adjustment', case=False, na=False)
+                        ]
                     elif type_key == "gp_after":
-                        filtered = df_filtered[df_filtered['Trade'].str.contains('Gross Profit', case=False, na=False)]
+                        # Gross Profit after adjustment
+                        filtered = df_filtered[
+                            df_filtered['Trade'].str.contains('after adjustment', case=False, na=False)
+                        ]
                     elif type_key == "income":
                         filtered = df_filtered[df_filtered['Item'].astype(str).str.match(r'^1(\.|$)', na=False)]
                     elif type_key == "cost":
@@ -911,16 +938,19 @@ def main():
                         filtered = df_filtered
                     
                     # Get total based on category
+                    # Column C = 1st Working Budget (Projection)
+                    # Column D = B (Business Plan / WIP)
+                    # Column F = D=B+C (Revision / Budget / Cash Flow)
                     if cat_key == "Budget_Revision":
-                        col_name = 'D_equals_BC'  # Revision as at = D=B+C
+                        col_name = 'D_equals_BC'  # D=B+C = Revision as at = Budget
                     elif cat_key == "Business_Plan":
                         col_name = 'B'  # B column
                     elif cat_key == "Audit_Report_WIP":
-                        col_name = 'B'  # WIP uses B column
+                        col_name = 'B'  # B column = WIP
                     elif cat_key == "Projection":
                         col_name = '1st_Working_Budget'  # 1st Working Budget
                     elif cat_key == "Cash_Flow":
-                        col_name = 'D_equals_BC'  # Cash Flow uses D=B+C
+                        col_name = 'D_equals_BC'  # D=B+C = Cash Flow uses same column
                     else:
                         col_name = 'D_equals_BC'
                     
