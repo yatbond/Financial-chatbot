@@ -612,14 +612,25 @@ def main():
             del st.session_state.project_meta
         
         with st.spinner(f"Searching {month_names[month]} {year}..."):
+            # Debug: Show root folder
+            st.write(f"Debug - Root folder ID: {st.session_state.root_folder_id}")
+            
             # Find year folder
             year_folder = list_folders(st.session_state.drive_service, st.session_state.root_folder_id, year)
+            st.write(f"Debug - Year folder '{year}': {'Found' if year_folder else 'Not found'}")
+            
             if year_folder:
                 # Find month folder
                 month_folder = list_folders(st.session_state.drive_service, year_folder[0]['id'], month)
+                st.write(f"Debug - Month folder '{month}': {'Found' if month_folder else 'Not found'}")
+                
                 if month_folder:
                     # Find Excel files
                     excel_files = find_excel_files_in_month(st.session_state.drive_service, month_folder[0]['id'])
+                    st.write(f"Debug - Excel files found: {len(excel_files)}")
+                    
+                    if excel_files:
+                        st.write(f"Debug - Files: {[f['name'] for f in excel_files]}")
                     
                     # Parse each file to get project code and name
                     projects = []
