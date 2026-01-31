@@ -89,8 +89,36 @@ def get_drive_service():
             # Check for credentials file
             creds_file = Path(__file__).parent / "credentials.json"
             if not creds_file.exists():
-                st.error("Google Drive credentials not found!")
-                st.info("Please download 'credentials.json' from Google Cloud Console and place it in the app directory.")
+                st.error("❌ Google Drive credentials not found!")
+                st.markdown("""
+                ### 📋 How to Set Up Google Drive Access:
+                
+                1. **Go to Google Cloud Console:**
+                   https://console.cloud.google.com
+                
+                2. **Enable Google Drive API:**
+                   - APIs & Services > Library
+                   - Search "Google Drive API"
+                   - Click "Enable"
+                
+                3. **Create OAuth credentials:**
+                   - APIs & Services > Credentials
+                   - Click "Create Credentials" > "OAuth client ID"
+                   - Application type: "Desktop app"
+                   - Download the JSON file
+                
+                4. **Rename and place the file:**
+                   - Rename to: `credentials.json`
+                   - Place in: Same folder as this app
+                
+                5. **Refresh this page**
+                """)
+                st.download_button(
+                    label="📥 Download Sample credentials.json Template",
+                    data='{"web":{"client_id":"YOUR_CLIENT_ID.apps.googleusercontent.com","project_id":"YOUR_PROJECT","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"YOUR_CLIENT_SECRET"}}',
+                    file_name="credentials_template.json",
+                    mime="application/json"
+                )
                 return None
             
             flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
