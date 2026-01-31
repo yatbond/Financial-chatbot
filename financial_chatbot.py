@@ -176,14 +176,17 @@ def list_folders(service, parent_id=None, folder_name=None):
 def find_excel_files_in_month(service, month_folder_id):
     """Find Excel files in month folder AND all subfolders."""
     try:
-        # First, find Excel files directly in month folder
-        query_direct = f"mimeType='application/vnd.google-apps.file' and name contains '.xlsx' and '{month_folder_id}' in parents"
+        all_files = []
+        
+        # Find files directly in month folder
+        query_direct = f"('{month_folder_id}' in parents)"
         results_direct = service.files().list(
             q=query_direct,
-            fields="files(id, name, modifiedTime)"
+            fields="files(id, name, mimeType, modifiedTime)"
         ).execute()
         
         files_direct = results_direct.get('files', [])
+        all_files.extend(files_direct)
         
         # Also find subfolders and search inside them
         query_folders = f"mimeType='application/vnd.google-apps.folder' and '{month_folder_id}' in parents"
@@ -193,17 +196,35 @@ def find_excel_files_in_month(service, month_folder_id):
         ).execute()
         
         subfolders = results_folders.get('files', [])
+        st.write(f"Debug - Found {len(subfolders)} subfolders: {[s['name'] for s in subfolders]}")
         
         # Search each subfolder
         for subfolder in subfolders:
-            query_sub = f"mimeType='application/vnd.google-apps.file' and name contains '.xlsx' and '{subfolder['id']}' in parents"
+            query_sub = f"'{subfolder['id']}' in parents"
             results_sub = service.files().list(
                 q=query_sub,
-                fields="files(id, name, modifiedTime)"
+                fields="files(id, name, mimeType, modifiedTime)"
             ).execute()
-            files_direct.extend(results_sub.get('files', []))
+            all_files.extend(results_sub.get('files', []))
         
-        return files_direct
+        # Filter for Excel files (xlsx or Google Sheets)
+        excel_files = []
+        for f in all_files:
+            name = f.get('name', '').lower()
+            mime = f.get('mimeType', '')
+            if ('.xlsx' in name or '.xls' in name or 
+                mime == 'application/vnd.google-apps.spreadsheet' or
+                name.endswith('.xlsx') or name.endswith('.xls')):
+                excel_files.append(f)
+        
+        st.write(f"Debug - Total files found: {len(all_files)}")
+        st.write(f"Debug - Files: {[f'{f[\"name\"]} ({f[\"mimeType\"]})' for f in all_files]}")
+        st.write(f"Debug - Excel files: {len(excel_files)}")
+        
+        return excel_files
+    except HttpError as e:
+        st.error(f"Error searching files: {e}")
+        return []
     except HttpError as e:
         st.error(f"Error searching files: {e}")
         return []
