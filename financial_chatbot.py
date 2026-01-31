@@ -516,7 +516,7 @@ def main():
         layout="centered"
     )
 
-    # Dark blue theme
+    # Dark blue theme with selected button styling
     st.markdown("""
     <style>
     .stApp {
@@ -549,6 +549,14 @@ def main():
     }
     button:hover {
         background-color: #2d5a8a !important;
+    }
+    /* Selected button styling */
+    button[data-testid="baseButton-primary"][aria-pressed="true"],
+    button[data-testid="baseButton-primary"].stButton > button[aria-pressed="true"] {
+        background-color: #0d3a6e !important;
+        border: 2px solid #4fc3f7 !important;
+        color: #ffffff !important;
+        font-weight: bold !important;
     }
     div[data-testid="stExpander"] {
         background-color: #152238 !important;
@@ -771,8 +779,16 @@ def main():
                 # Parse Financial Status sheet
                 df_financial = pd.read_excel(excel_file, sheet_name='Financial Status', header=None)
                 
+                # Debug: Show what we found in the sheet
+                st.write("Debug - Financial Status sheet rows 8-15:")
+                for idx in range(8, min(16, len(df_financial))):
+                    col0 = str(df_financial.iloc[idx, 0]) if pd.notna(df_financial.iloc[idx, 0]) else ""
+                    col1 = df_financial.iloc[idx, 1] if pd.notna(df_financial.iloc[idx, 1]) else ""
+                    col3 = df_financial.iloc[idx, 3] if pd.notna(df_financial.iloc[idx, 3]) else ""
+                    col5 = df_financial.iloc[idx, 5] if pd.notna(df_financial.iloc[idx, 5]) else ""
+                    st.write(f"Row {idx}: {col0} | Col1={col1} | Col3={col3} | Col5={col5}")
+                
                 # Extract the 3 key metrics from Financial Status
-                # Row 9-11 contain the Gross Profit data
                 gp_projection = 0
                 gp_wip = 0
                 gp_cash_flow = 0
@@ -784,6 +800,7 @@ def main():
                         gp_projection = float(df_financial.iloc[idx, 1]) if pd.notna(df_financial.iloc[idx, 1]) else 0
                         gp_wip = float(df_financial.iloc[idx, 3]) if pd.notna(df_financial.iloc[idx, 3]) else 0
                         gp_cash_flow = float(df_financial.iloc[idx, 5]) if pd.notna(df_financial.iloc[idx, 5]) else 0
+                        st.write(f"Debug - Found Gross Profit at row {idx}")
                         break
                 
                 # Show 3 high-level metrics from Financial Status
