@@ -2,5 +2,5 @@
   "buildCommand": "pip install -r requirements.txt",
   "devCommand": "streamlit run financial_chatbot.py",
   "installCommand": "pip install pipenv && pipenv install",
-  "framework": "streamlit"
+  "framework": null
 }
