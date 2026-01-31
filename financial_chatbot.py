@@ -196,8 +196,6 @@ def find_excel_files_in_month(service, month_folder_id):
         ).execute()
         
         subfolders = results_folders.get('files', [])
-        subfolder_names = [s['name'] for s in subfolders]
-        st.write(f"Debug - Found {len(subfolders)} subfolders: {subfolder_names}")
         
         # Search each subfolder
         for subfolder in subfolders:
@@ -217,16 +215,6 @@ def find_excel_files_in_month(service, month_folder_id):
                 mime == 'application/vnd.google-apps.spreadsheet' or
                 name.endswith('.xlsx') or name.endswith('.xls')):
                 excel_files.append(f)
-        
-        st.write(f"Debug - Total files found: {len(all_files)}")
-        
-        # Show file names safely
-        file_list = []
-        for f in all_files:
-            name = f.get('name', 'Unknown')
-            file_list.append(name)
-        st.write(f"Debug - Files: {file_list}")
-        st.write(f"Debug - Excel files: {len(excel_files)}")
         
         return excel_files
     except HttpError as e:
@@ -661,65 +649,55 @@ def main():
             del st.session_state.project_meta
         
         with st.spinner(f"Searching {month_names[month]} {year}..."):
-            # Debug: Show root folder
-            st.write(f"Debug - Root folder ID: {st.session_state.root_folder_id}")
-            
             # Find year folder
             year_folder = list_folders(st.session_state.drive_service, st.session_state.root_folder_id, year)
-            st.write(f"Debug - Year folder '{year}': {'Found' if year_folder else 'Not found'}")
             
             if year_folder:
                 # Find month folder
                 month_folder = list_folders(st.session_state.drive_service, year_folder[0]['id'], month)
-                st.write(f"Debug - Month folder '{month}': {'Found' if month_folder else 'Not found'}")
                 
                 if month_folder:
                     # Find Excel files
                     excel_files = find_excel_files_in_month(st.session_state.drive_service, month_folder[0]['id'])
-                    st.write(f"Debug - Excel files found: {len(excel_files)}")
                     
                     if excel_files:
-                        st.write(f"Debug - Files: {[f['name'] for f in excel_files]}")
-                    
-                    # Parse each file to get project code and name
-                    projects = []
-                    for file in excel_files:
-                        try:
-                            from io import BytesIO
-                            request = st.session_state.drive_service.files().get_media(fileId=file['id'])
-                            file_content = request.execute()
-                            excel_file = BytesIO(file_content)
-                            df = pd.read_excel(excel_file, sheet_name='Financial Status', header=None, nrows=10)
-                            
-                            # Extract project code and name
-                            project_code = str(df.iloc[2, 1]).strip() if pd.notna(df.iloc[2, 1]) else "Unknown"
-                            project_name = str(df.iloc[3, 1]).strip() if pd.notna(df.iloc[3, 1]) else file['name'].replace('.xlsx', '')
-                            
-                            projects.append({
-                                'file_id': file['id'],
-                                'file_name': file['name'],
-                                'code': project_code,
-                                'name': project_name,
-                                'year': year,
-                                'month': month_names[month],
-                                'month_folder_id': month_folder[0]['id']
-                            })
-                        except Exception as e:
-                            # Fallback to filename
-                            projects.append({
-                                'file_id': file['id'],
-                                'file_name': file['name'],
-                                'code': "Unknown",
-                                'name': file['name'].replace('.xlsx', ''),
-                                'year': year,
-                                'month': month_names[month],
-                                'month_folder_id': month_folder[0]['id']
-                            })
-                    
-                    st.session_state.projects_found = projects
-                    
-                    # Sort projects alphabetically by first word of name
-                    st.session_state.projects_found.sort(key=lambda x: x['name'].split()[0].lower() if x['name'].split() else '')
+                        # Parse each file to get project code and name
+                        projects = []
+                        for file in excel_files:
+                            try:
+                                from io import BytesIO
+                                request = st.session_state.drive_service.files().get_media(fileId=file['id'])
+                                file_content = request.execute()
+                                excel_file = BytesIO(file_content)
+                                df = pd.read_excel(excel_file, sheet_name='Financial Status', header=None, nrows=10)
+                                
+                                # Extract project code and name
+                                project_code = str(df.iloc[2, 1]).strip() if pd.notna(df.iloc[2, 1]) else "Unknown"
+                                project_name = str(df.iloc[3, 1]).strip() if pd.notna(df.iloc[3, 1]) else file['name'].replace('.xlsx', '')
+                                
+                                projects.append({
+                                    'file_id': file['id'],
+                                    'file_name': file['name'],
+                                    'code': project_code,
+                                    'name': project_name,
+                                    'year': year,
+                                    'month': month_names[month],
+                                    'month_folder_id': month_folder[0]['id']
+                                })
+                            except Exception as e:
+                                # Fallback to filename
+                                projects.append({
+                                    'file_id': file['id'],
+                                    'file_name': file['name'],
+                                    'code': "Unknown",
+                                    'name': file['name'].replace('.xlsx', ''),
+                                    'year': year,
+                                    'month': month_names[month],
+                                    'month_folder_id': month_folder[0]['id']
+                                })
+                        
+                        # Sort projects by code (number) from small to large
+                        st.session_state.projects_found = sorted(projects, key=lambda x: int(x['code']) if x['code'].isdigit() else float('inf'))
                 else:
                     st.session_state.projects_found = []
             else:
