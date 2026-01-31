@@ -478,6 +478,50 @@ def main():
         page_icon="📊",
         layout="centered"
     )
+
+    # Dark blue theme
+    st.markdown("""
+    <style>
+    .stApp {
+        background-color: #0c1929;
+    }
+    .stTitle, .stMarkdown, .stCaption, .stText, p, h1, h2, h3, h4 {
+        color: #e0e6ed !important;
+    }
+    .stSelectbox label, .stButton label {
+        color: #e0e6ed !important;
+    }
+    div[data-testid="stMetricValue"] {
+        color: #4fc3f7 !important;
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #90caf9 !important;
+    }
+    .stSuccess, .stInfo {
+        background-color: #1e3a5f !important;
+        color: #e0e6ed !important;
+    }
+    .stError {
+        background-color: #4a1515 !important;
+        color: #ffcdd2 !important;
+    }
+    button {
+        background-color: #1e4a7a !important;
+        color: #e0e6ed !important;
+        border: 1px solid #2d5a8a !important;
+    }
+    button:hover {
+        background-color: #2d5a8a !important;
+    }
+    div[data-testid="stExpander"] {
+        background-color: #152238 !important;
+    }
+    input {
+        background-color: #1a2a3a !important;
+        color: #e0e6ed !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
     # Initialize session state
     if 'projects_cache' not in st.session_state:
@@ -538,10 +582,10 @@ def main():
     # Selection Controls
     st.markdown("### 📁 Select Project")
     
-    col1, col2, col3 = st.columns([1, 1, 1])
+    col1, col2 = st.columns(2)
     
     with col1:
-        year = st.selectbox("Year", options=["2024", "2025", "2026"], index=1)
+        year = st.selectbox("Year", options=["2024", "2025", "2026"], index=1, key="year_select")
     
     with col2:
         months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"]
@@ -551,63 +595,104 @@ def main():
             "07": "July", "08": "August", "09": "September",
             "10": "October", "11": "November", "12": "December"
         }
-        month = st.selectbox("Month", options=months, format_func=lambda x: month_names[x])
+        month = st.selectbox("Month", options=months, format_func=lambda x: month_names[x], key="month_select")
     
-    with col3:
-        st.markdown("<br>", unsafe_allow_html=True)  # Spacing
-        find_btn = st.button("🔍 Find Files", use_container_width=True)
+    # Auto-search when year or month changes
+    search_key = f"{year}-{month}"
     
-    # Find files when button clicked
-    if find_btn or ('last_search' in st.session_state and st.session_state.get('last_search') == f"{year}-{month}"):
-        if find_btn:
-            with st.spinner(f"Searching {month_names[month]} {year}..."):
-                # Find year folder
-                year_folder = list_folders(st.session_state.drive_service, st.session_state.root_folder_id, year)
-                if not year_folder:
-                    st.error(f"Year '{year}' not found in Google Drive")
-                    st.session_state.files_found = []
-                else:
-                    # Find month folder
-                    month_folder = list_folders(st.session_state.drive_service, year_folder[0]['id'], month)
-                    if not month_folder:
-                        st.error(f"Month '{month}' not found in {year}")
-                        st.session_state.files_found = []
-                    else:
-                        # Find Excel files
-                        excel_files = find_excel_files_in_month(st.session_state.drive_service, month_folder[0]['id'])
-                        st.session_state.files_found = excel_files
-                        st.session_state.month_folder_id = month_folder[0]['id']
-                        st.session_state.last_search = f"{year}-{month}"
-    
-    # Display files found
-    if 'files_found' in st.session_state and st.session_state.files_found:
-        st.markdown(f"**Found {len(st.session_state.files_found)} files:**")
+    if search_key != st.session_state.get('last_search'):
+        st.session_state.last_search = search_key
+        st.session_state.projects_found = []
+        st.session_state.selected_project = None
+        if 'project_data' in st.session_state:
+            del st.session_state.project_data
+        if 'project_meta' in st.session_state:
+            del st.session_state.project_meta
         
-        # Create a grid for file selection
-        cols = st.columns(3)
-        for i, file in enumerate(st.session_state.files_found):
-            with cols[i % 3]:
-                if st.button(f"📄 {file['name']}", key=f"file_{i}", use_container_width=True):
-                    st.session_state.selected_project = {
-                        'name': file['name'].replace('.xlsx', ''),
-                        'file_id': file['id'],
-                        'file_name': file['name'],
-                        'year': year,
-                        'month': month_names[month],
-                        'month_folder_id': st.session_state.month_folder_id
-                    }
+        with st.spinner(f"Searching {month_names[month]} {year}..."):
+            # Find year folder
+            year_folder = list_folders(st.session_state.drive_service, st.session_state.root_folder_id, year)
+            if year_folder:
+                # Find month folder
+                month_folder = list_folders(st.session_state.drive_service, year_folder[0]['id'], month)
+                if month_folder:
+                    # Find Excel files
+                    excel_files = find_excel_files_in_month(st.session_state.drive_service, month_folder[0]['id'])
+                    
+                    # Parse each file to get project code and name
+                    projects = []
+                    for file in excel_files:
+                        try:
+                            from io import BytesIO
+                            request = st.session_state.drive_service.files().get_media(fileId=file['id'])
+                            file_content = request.execute()
+                            excel_file = BytesIO(file_content)
+                            df = pd.read_excel(excel_file, sheet_name='Financial Status', header=None, nrows=10)
+                            
+                            # Extract project code and name
+                            project_code = str(df.iloc[2, 1]).strip() if pd.notna(df.iloc[2, 1]) else "Unknown"
+                            project_name = str(df.iloc[3, 1]).strip() if pd.notna(df.iloc[3, 1]) else file['name'].replace('.xlsx', '')
+                            
+                            projects.append({
+                                'file_id': file['id'],
+                                'file_name': file['name'],
+                                'code': project_code,
+                                'name': project_name,
+                                'year': year,
+                                'month': month_names[month],
+                                'month_folder_id': month_folder[0]['id']
+                            })
+                        except Exception as e:
+                            # Fallback to filename
+                            projects.append({
+                                'file_id': file['id'],
+                                'file_name': file['name'],
+                                'code': "Unknown",
+                                'name': file['name'].replace('.xlsx', ''),
+                                'year': year,
+                                'month': month_names[month],
+                                'month_folder_id': month_folder[0]['id']
+                            })
+                    
+                    st.session_state.projects_found = projects
+                else:
+                    st.session_state.projects_found = []
+            else:
+                st.session_state.projects_found = []
+    
+    # Display projects found
+    if st.session_state.get('projects_found'):
+        st.markdown(f"**Found {len(st.session_state.projects_found)} projects:**")
+        
+        # Create cards for each project
+        for i, proj in enumerate(st.session_state.projects_found):
+            is_selected = st.session_state.get('selected_project', {}).get('file_id') == proj['file_id']
+            
+            if is_selected:
+                st.markdown(f"""
+                <div style="background-color: #1e4a7a; padding: 15px; border-radius: 10px; margin: 5px 0; border: 2px solid #4fc3f7;">
+                    <strong style="color: #4fc3f7; font-size: 18px;">{proj['code']}</strong>
+                    <span style="color: #e0e6ed; font-size: 16px;"> - {proj['name']}</span>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                if st.button(f"📁 {proj['code']} - {proj['name']}", key=f"project_{i}", use_container_width=True):
+                    st.session_state.selected_project = proj
                     # Clear old project data
                     if 'project_data' in st.session_state:
                         del st.session_state.project_data
                     if 'project_meta' in st.session_state:
                         del st.session_state.project_meta
+                    st.rerun()
+    elif st.session_state.get('last_search') and not st.session_state.get('projects_found'):
+        st.info(f"No projects found in {month_names[month]} {year}")
     
     # Show selected project data
     if st.session_state.selected_project:
         project = st.session_state.selected_project
         
         st.markdown("---")
-        st.markdown(f"### 📄 {project['name']}")
+        st.markdown(f"### 📄 {project['code']} - {project['name']}")
         st.caption(f"{project['month']} {project['year']}")
         
         # Load data if not already loaded
