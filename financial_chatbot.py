@@ -196,7 +196,8 @@ def find_excel_files_in_month(service, month_folder_id):
         ).execute()
         
         subfolders = results_folders.get('files', [])
-        st.write(f"Debug - Found {len(subfolders)} subfolders: {[s['name'] for s in subfolders]}")
+        subfolder_names = [s['name'] for s in subfolders]
+        st.write(f"Debug - Found {len(subfolders)} subfolders: {subfolder_names}")
         
         # Search each subfolder
         for subfolder in subfolders:
@@ -218,7 +219,13 @@ def find_excel_files_in_month(service, month_folder_id):
                 excel_files.append(f)
         
         st.write(f"Debug - Total files found: {len(all_files)}")
-        st.write(f"Debug - Files: {[f'{f[\"name\"]} ({f[\"mimeType\"]})' for f in all_files]}")
+        
+        # Show file names safely
+        file_list = []
+        for f in all_files:
+            name = f.get('name', 'Unknown')
+            file_list.append(name)
+        st.write(f"Debug - Files: {file_list}")
         st.write(f"Debug - Excel files: {len(excel_files)}")
         
         return excel_files
