@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "perry-coding-agents": {
+      "version": "1.5.0",
+      "installedAt": 1769822285252
+    },
+    "cursor-agent": {
+      "version": "2.1.0",
+      "installedAt": 1769822308915
+    },
+    "claude": {
+      "version": "1.1.0",
+      "installedAt": 1769822382406
+    }
+  }
+}
