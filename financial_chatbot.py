@@ -570,13 +570,15 @@ def main():
             service = get_drive_service()
             if service:
                 st.session_state.drive_service = service
+                st.success("Connected to Google Drive!")
             else:
-                st.error("Failed to connect to Google Drive. Please check credentials.")
-                return
+                st.warning("Could not connect to Google Drive.")
+                st.info("Check your secrets configuration in Streamlit Cloud settings.")
     
     # Check if root folder exists
     if not st.session_state.root_folder_id:
-        st.error(f"Root folder '{DRIVE_ROOT_FOLDER_NAME}' not found in Google Drive!")
+        st.warning(f"Root folder '{DRIVE_ROOT_FOLDER_NAME}' not found in Google Drive!")
+        st.info("Please ensure you have shared the folder with the service account.")
         return
     
     # Selection Controls
