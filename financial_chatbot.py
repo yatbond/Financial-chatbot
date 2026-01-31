@@ -86,43 +86,63 @@ def get_drive_service():
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            # Check for credentials file
-            creds_file = Path(__file__).parent / "credentials.json"
-            if not creds_file.exists():
-                st.error("❌ Google Drive credentials not found!")
-                st.markdown("""
-                ### 📋 How to Set Up Google Drive Access:
+            # Check for Streamlit Cloud secrets first
+            try:
+                if 'google_credentials' in st.secrets:
+                    import json as json_module
+                    creds_json = st.secrets['google_credentials']
+                    # Handle both string and dict formats
+                    if isinstance(creds_json, str):
+                        creds_dict = json_module.loads(creds_json)
+                    else:
+                        creds_dict = creds_json
+                    
+                    # Write temp file for InstalledAppFlow
+                    import tempfile
+                    creds_file = Path(tempfile.gettempdir()) / "credentials.json"
+                    with open(creds_file, 'w') as f:
+                        json_module.dump(creds_dict, f)
+                    
+                    flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
+                    creds = flow.run_local_server(port=0)
+                elif 'installed' in st.secrets or 'web' in st.secrets:
+                    # Already in credentials format
+                    import json as json_module
+                    creds_dict = dict(st.secrets)
+                    creds_file = Path(tempfile.gettempdir()) / "credentials.json"
+                    with open(creds_file, 'w') as f:
+                        json_module.dump(creds_dict, f)
+                    
+                    flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
+                    creds = flow.run_local_server(port=0)
+                else:
+                    raise FileNotFoundError("No credentials in secrets")
+            except Exception as secret_error:
+                # Fall back to local credentials.json file
+                creds_file = Path(__file__).parent / "credentials.json"
+                if not creds_file.exists():
+                    st.error("❌ Google Drive credentials not found!")
+                    st.markdown("""
+                    ### 📋 How to Set Up Google Drive Access:
+                    
+                    **For Streamlit Cloud:**
+                    1. Go to your app Settings > Secrets
+                    2. Add your Google credentials JSON
+                    
+                    **For Local Development:**
+                    1. Download credentials.json from Google Cloud Console
+                    2. Place in the same folder as this app
+                    """)
+                    st.download_button(
+                        label="📥 Download Sample credentials.json Template",
+                        data='{"installed":{"client_id":"YOUR_CLIENT_ID.apps.googleusercontent.com","client_secret":"YOUR_CLIENT_SECRET"}}',
+                        file_name="credentials_template.json",
+                        mime="application/json"
+                    )
+                    return None
                 
-                1. **Go to Google Cloud Console:**
-                   https://console.cloud.google.com
-                
-                2. **Enable Google Drive API:**
-                   - APIs & Services > Library
-                   - Search "Google Drive API"
-                   - Click "Enable"
-                
-                3. **Create OAuth credentials:**
-                   - APIs & Services > Credentials
-                   - Click "Create Credentials" > "OAuth client ID"
-                   - Application type: "Desktop app"
-                   - Download the JSON file
-                
-                4. **Rename and place the file:**
-                   - Rename to: `credentials.json`
-                   - Place in: Same folder as this app
-                
-                5. **Refresh this page**
-                """)
-                st.download_button(
-                    label="📥 Download Sample credentials.json Template",
-                    data='{"web":{"client_id":"YOUR_CLIENT_ID.apps.googleusercontent.com","project_id":"YOUR_PROJECT","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"YOUR_CLIENT_SECRET"}}',
-                    file_name="credentials_template.json",
-                    mime="application/json"
-                )
-                return None
-            
-            flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
-            creds = flow.run_local_server(port=0)
+                flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
+                creds = flow.run_local_server(port=0)
         
         # Save token
         with open(TOKEN_FILE, 'wb') as token:
