@@ -717,6 +717,9 @@ def main():
                             })
                     
                     st.session_state.projects_found = projects
+                    
+                    # Sort projects alphabetically by first word of name
+                    st.session_state.projects_found.sort(key=lambda x: x['name'].split()[0].lower() if x['name'].split() else '')
                 else:
                     st.session_state.projects_found = []
             else:
