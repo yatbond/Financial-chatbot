@@ -726,9 +726,13 @@ def main():
     if st.session_state.get('projects_found'):
         st.markdown(f"**Found {len(st.session_state.projects_found)} projects:**")
         
+        # Get selected file_id safely
+        selected = st.session_state.get('selected_project')
+        selected_id = selected.get('file_id') if selected else None
+        
         # Create cards for each project
         for i, proj in enumerate(st.session_state.projects_found):
-            is_selected = st.session_state.get('selected_project', {}).get('file_id') == proj['file_id']
+            is_selected = (selected_id == proj['file_id'])
             
             if is_selected:
                 st.markdown(f"""
