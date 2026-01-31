@@ -88,16 +88,15 @@ def get_drive_service():
         else:
             # Check for Streamlit Cloud secrets first
             try:
+                # Method 1: google_credentials as a JSON string
                 if 'google_credentials' in st.secrets:
                     import json as json_module
                     creds_json = st.secrets['google_credentials']
-                    # Handle both string and dict formats
                     if isinstance(creds_json, str):
                         creds_dict = json_module.loads(creds_json)
                     else:
                         creds_dict = creds_json
                     
-                    # Write temp file for InstalledAppFlow
                     import tempfile
                     creds_file = Path(tempfile.gettempdir()) / "credentials.json"
                     with open(creds_file, 'w') as f:
@@ -105,10 +104,11 @@ def get_drive_service():
                     
                     flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
                     creds = flow.run_local_server(port=0)
+                
+                # Method 2: 'installed' or 'web' keys directly
                 elif 'installed' in st.secrets or 'web' in st.secrets:
-                    # Already in credentials format
                     import json as json_module
-                    creds_dict = dict(st.secrets)
+                    creds_dict = {k: dict(v) if hasattr(v, 'keys') else v for k, v in st.secrets.items()}
                     creds_file = Path(tempfile.gettempdir()) / "credentials.json"
                     with open(creds_file, 'w') as f:
                         json_module.dump(creds_dict, f)
