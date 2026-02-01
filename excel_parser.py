@@ -1,228 +1,274 @@
 """
-Excel Chatbot - Robust Excel Parser for Construction Project Financial Data
-Handles monthly time-series data from Projection, Committed Cost, Accrual, Cash Flow sheets.
+Excel Financial Data Parser
+Converts Excel workbooks with merged headers into flat database-style tables.
+
+Structure:
+- Financial Status sheet: Year/Month from B5, Financial Type from merged column headers
+- Other sheets: Sheet name = Financial Type, Column headings = Time periods
+
+Output: Flat table with columns:
+Year | Month | Sheet_Name | Financial_Type | Item_Code | Trade | Value
 """
 
 import pandas as pd
-import json
+import numpy as np
 from pathlib import Path
+from datetime import datetime
+import json
+from io import BytesIO
+
+# Month name to number mapping
+MONTH_MAP = {
+    'january': 1, 'jan': 1,
+    'february': 2, 'feb': 2,
+    'march': 3, 'mar': 3,
+    'april': 4, 'apr': 4,
+    'may': 5,
+    'june': 6, 'jun': 6,
+    'july': 7, 'jul': 7,
+    'august': 8, 'aug': 8,
+    'september': 9, 'sep': 9, 'sept': 9,
+    'october': 10, 'oct': 10,
+    'november': 11, 'nov': 11,
+    'december': 12, 'dec': 12
+}
 
 
-def parse_excel_file(file_path: str) -> dict:
+def parse_date_to_year_month(date_val):
+    """Extract Year and Month from various date formats."""
+    if pd.isna(date_val):
+        return None, None
+    
+    try:
+        # Handle string dates like "2025-12-31"
+        if isinstance(date_val, str):
+            dt = pd.to_datetime(date_val)
+        else:
+            dt = pd.to_datetime(date_val)
+        return dt.year, dt.month
+    except:
+        return None, None
+
+
+def get_merged_header_value(df, row_idx, col_idx):
+    """Get the actual value from a cell, handling NaN and merged cells."""
+    val = df.iloc[row_idx, col_idx]
+    if pd.notna(val):
+        return str(val).strip()
+    return ""
+
+
+def parse_financial_status_sheet(xl, year=None, month=None):
     """
-    Parse the construction project Excel file.
-    
-    Structure:
-    - Each sheet (Projection, Committed Cost, Accrual, Cash Flow) has monthly data
-    - Columns: Item, Trade, Bal B/F, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec, Jan, Feb, Mar, Total
-    - Row 11 = column headers
-    - Row 12 = category header (e.g., "Income", "Cost") - SKIP (no numeric values)
-    - Row 13+ = actual data items with numeric values
+    Parse Financial Status sheet.
+    Returns list of tuples: (year, month, "Financial Status", financial_type, item_code, trade, value)
     """
-    file_path = Path(file_path)
+    df = pd.read_excel(xl, sheet_name='Financial Status', header=None)
+    rows = []
     
-    # Sheets to process
-    sheets_to_process = ['Projection', 'Committed Cost', 'Accrual', 'Cash Flow']
+    # Extract Year/Month from Report Date (cell B5, which is row 4, col 1)
+    if year is None or month is None:
+        report_date = get_merged_header_value(df, 4, 1)  # B5
+        year, month = parse_date_to_year_month(report_date)
     
-    result = {
-        'metadata': {},
-        'sheets': {},
-        'all_sheets': sheets_to_process
-    }
+    if year is None or month is None:
+        print(f"Warning: Could not extract year/month from Financial Status")
+        return []
     
-    # Extract metadata from first sheet
-    metadata_df = pd.read_excel(file_path, sheet_name=sheets_to_process[0], header=None)
-    result['metadata'] = extract_metadata(metadata_df)
+    # Build financial type mapping from merged headers (rows 11-14)
+    # Headers span multiple rows - need to trace vertically
+    # Row 11: main category (e.g., "Budget", "Business Plan")
+    # Row 12: sub-category (e.g., "Tender", "1st Working Budget")
+    # Row 14: code (e.g., "A", "B", "D=B+C")
+    financial_types = {}
     
-    # Parse each sheet
-    for sheet_name in sheets_to_process:
-        print(f"Processing sheet: {sheet_name}")
-        df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+    for col_idx in range(2, df.shape[1]):
+        # Trace vertically to build the full header name
+        header_parts = []
         
-        # Parse using the correct structure (header at row 11, data at row 13+)
-        cleaned_df = parse_monthly_sheet(df, sheet_name)
-        result['sheets'][sheet_name] = cleaned_df
+        # Check rows 11-14 for header values in this column
+        for row_idx in range(11, 15):
+            if row_idx < len(df) and col_idx < df.shape[1]:
+                val = df.iloc[row_idx, col_idx]
+                if pd.notna(val) and str(val).strip():
+                    header_parts.append(str(val).strip())
         
-        print(f"  - Extracted {len(cleaned_df)} data rows")
+        # Combine parts to create the full financial type
+        if header_parts:
+            # Filter out generic terms like "Budget" that are just category labels
+            filtered_parts = []
+            for part in header_parts:
+                # Skip very short or generic headers that are just category labels
+                if part.lower() not in ['budget', 'nan', '']:
+                    filtered_parts.append(part)
+            
+            # If filtered_parts is empty, use original
+            if not filtered_parts:
+                combined = ' '.join(header_parts)
+            else:
+                combined = ' '.join(filtered_parts)
+            
+            if combined:
+                financial_types[col_idx] = combined
     
-    return result
+    print(f"DEBUG: Found {len(financial_types)} financial types: {list(financial_types.values())[:5]}")
+    
+    # Parse data rows (starting from row 15)
+    for row_idx in range(15, len(df)):
+        item_code = get_merged_header_value(df, row_idx, 0)  # Column A
+        trade = get_merged_header_value(df, row_idx, 1)  # Column B
+        
+        # Skip empty rows or header rows
+        if not item_code or item_code in ['Item', '(HK$']:
+            continue
+        
+        # Parse numeric values for each financial type column
+        for col_idx, fin_type in financial_types.items():
+            if col_idx < df.shape[1]:
+                val = df.iloc[row_idx, col_idx]
+                try:
+                    numeric_val = float(val) if pd.notna(val) else 0
+                    # Only include non-zero values or structure rows
+                    if numeric_val != 0 or '.' not in str(item_code):
+                        rows.append((year, month, "Financial Status", fin_type, item_code, trade, numeric_val))
+                except (ValueError, TypeError):
+                    pass
+    
+    return rows
 
 
-def extract_metadata(df: pd.DataFrame) -> dict:
-    """Extract project metadata from header rows."""
-    metadata = {}
-    
-    for idx, row in df.iterrows():
-        for col_idx, cell in enumerate(row):
-            if pd.isna(cell):
-                continue
-            
-            cell_str = str(cell).strip()
-            
-            if 'Project Code:' in cell_str:
-                val = row.iloc[col_idx + 1] if col_idx + 1 < len(row) else None
-                if pd.notna(val):
-                    metadata['project_code'] = str(val).strip()
-            
-            elif 'Project Name:' in cell_str:
-                val = row.iloc[col_idx + 1] if col_idx + 1 < len(row) else None
-                if pd.notna(val):
-                    metadata['project_name'] = str(val).strip()
-            
-            elif 'Report Date:' in cell_str:
-                val = row.iloc[col_idx + 1] if col_idx + 1 < len(row) else None
-                if pd.notna(val):
-                    metadata['report_date'] = str(val).strip()
-            
-            elif 'Start Date:' in cell_str:
-                val = row.iloc[col_idx + 1] if col_idx + 1 < len(row) else None
-                if pd.notna(val):
-                    metadata['start_date'] = str(val).strip()
-            
-            elif 'Complete Date:' in cell_str and 'Target' not in cell_str:
-                val = row.iloc[col_idx + 1] if col_idx + 1 < len(row) else None
-                if pd.notna(val):
-                    metadata['complete_date'] = str(val).strip()
-            
-            elif 'Target Complete Date:' in cell_str:
-                val = row.iloc[col_idx + 1] if col_idx + 1 < len(row) else None
-                if pd.notna(val):
-                    metadata['target_complete_date'] = str(val).strip()
-    
-    # Company name
-    if pd.notna(df.iloc[0, 0]):
-        metadata['company'] = str(df.iloc[0, 0]).strip()
-    
-    return metadata
-
-
-def is_category_header(row_df: pd.DataFrame) -> bool:
+def parse_time_column_header(header_val):
     """
-    Check if a row is a category header (like 'Income', 'Cost') rather than a data row.
-    
-    Category headers have:
-    - Item_Code is a simple integer (1, 2, 3...) without decimals
-    - Trade is a category name (not indented)
-    - No numeric values in any column (all NaN or 0)
-    
-    Data rows have:
-    - Item_Code with decimals (1.1, 1.2.1) OR indented name (starts with "-")
-    - At least one numeric column has non-zero/non-NaN value
+    Parse time column header to extract month and year.
+    Returns (month_number, year) or (month_number, None) if year not in header.
     """
-    item_code = row_df['Item_Code']
-    trade = row_df['Trade']
+    if pd.isna(header_val) or not header_val:
+        return None, None
     
-    # Skip if item code is empty
-    if pd.isna(item_code) or str(item_code).strip() == '':
-        return True
+    header = str(header_val).strip().lower()
     
-    item_str = str(item_code).strip()
+    # Check for month names
+    for month_name, month_num in MONTH_MAP.items():
+        if month_name in header:
+            return month_num, None
     
-    # If it has decimals, it's a data row
-    if '.' in item_str:
-        return False
-    
-    # If it doesn't start with a digit, it might be a sub-item (like "1.2.1" as string)
-    if not item_str[0].isdigit():
-        return False
-    
-    # It's a simple integer like "1", "2", "3" - check if it has values
-    # Check if any numeric column has a non-zero, non-NaN value
-    numeric_cols = ['Bal_BF', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Total']
-    for col in numeric_cols:
-        if col in row_df.index:
-            val = row_df[col]
-            if pd.notna(val) and val != 0:
-                return False  # Has values, so it's a data row
-    
-    # No values found - it's a category header
-    return True
+    return None, None
 
 
-def parse_monthly_sheet(df: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
+def parse_other_sheet(xl, sheet_name, base_year=None):
     """
-    Parse a monthly data sheet.
-    
-    Expected structure:
-    - Row 11: Headers (Item, Trade, Bal B/F, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec, Jan, Feb, Mar, Total)
-    - Row 12: Category header (e.g., "Income") - SKIP
-    - Row 13+: Data rows
+    Parse other sheets (Projection, Committed Cost, etc.)
+    Sheet name = Financial Type
+    Column headings = Time periods
+    Returns list of tuples: (year, month, sheet_name, financial_type, item_code, trade, value)
     """
-    # Column names for monthly data
-    column_names = ['Item_Code', 'Trade', 'Bal_BF', 'Apr', 'May', 'Jun', 
-                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 
-                    'Jan', 'Feb', 'Mar', 'Total']
+    df = pd.read_excel(xl, sheet_name=sheet_name, header=None)
+    rows = []
     
-    # Data starts at row 12 (0-indexed) - includes category headers
-    data_start_row = 12
+    # Extract Year/Month from Report Date (cell B5, which is row 4, col 1)
+    report_date = get_merged_header_value(df, 4, 1)  # B5
+    year, month = parse_date_to_year_month(report_date)
     
-    # Extract data rows
-    data_df = df.iloc[data_start_row:].copy()
-    data_df = data_df.reset_index(drop=True)
+    if year is None and base_year:
+        year = base_year
     
-    # Assign column names
-    if len(data_df.columns) >= 16:
-        data_df.columns = column_names[:len(data_df.columns)]
+    if year is None:
+        print(f"Warning: Could not extract year from {sheet_name}")
+        return []
+    
+    # Get time column headers (row 11)
+    time_headers = [get_merged_header_value(df, 11, c) for c in range(df.shape[1])]
+    
+    # Build time column mapping: col_idx -> (month, year_if_specified)
+    time_columns = {}
+    for col_idx in range(2, df.shape[1]):  # Start from column C (index 2)
+        header = time_headers[col_idx] if col_idx < len(time_headers) else ""
+        if header:
+            month, col_year = parse_time_column_header(header)
+            if month:
+                time_columns[col_idx] = (month, col_year if col_year else year)
+    
+    # Parse data rows (starting from row 12)
+    for row_idx in range(12, len(df)):
+        item_code = get_merged_header_value(df, row_idx, 0)  # Column A
+        trade = get_merged_header_value(df, row_idx, 1)  # Column B
+        
+        # Skip empty rows or header rows
+        if not item_code or item_code in ['Item', '(HK$']:
+            continue
+        
+        # Get values for each time column
+        for col_idx, (col_month, col_year) in time_columns.items():
+            if col_idx < df.shape[1]:
+                val = df.iloc[row_idx, col_idx]
+                try:
+                    numeric_val = float(val) if pd.notna(val) else 0
+                    # Only include non-zero values or structure rows
+                    if numeric_val != 0 or '.' not in str(item_code):
+                        rows.append((col_year, col_month, sheet_name, sheet_name, item_code, trade, numeric_val))
+                except (ValueError, TypeError):
+                    pass
+    
+    return rows
+
+
+def parse_workbook(file_path):
+    """
+    Parse a complete Excel workbook and return flat data.
+    Returns DataFrame with columns: Year, Month, Sheet_Name, Financial_Type, Item_Code, Trade, Value
+    """
+    all_rows = []
+    
+    xl = pd.ExcelFile(file_path)
+    
+    # Parse Financial Status first to get base year/month
+    fs_rows = parse_financial_status_sheet(xl)
+    all_rows.extend(fs_rows)
+    
+    # Get base year from Financial Status
+    base_year = fs_rows[0][0] if fs_rows else None
+    
+    # Parse other sheets
+    for sheet_name in xl.sheet_names:
+        if sheet_name != 'Financial Status':
+            other_rows = parse_other_sheet(xl, sheet_name, base_year)
+            all_rows.extend(other_rows)
+    
+    # Create DataFrame
+    if all_rows:
+        df = pd.DataFrame(all_rows, columns=['Year', 'Month', 'Sheet_Name', 'Financial_Type', 'Item_Code', 'Trade', 'Value'])
+        return df
     else:
-        # Pad with empty columns if needed
-        for i in range(len(data_df.columns), 16):
-            data_df[i] = None
-        data_df.columns = column_names
-    
-    # Filter out rows where Item_Code is empty
-    data_df = data_df[data_df['Item_Code'].notna()]
-    
-    # Clean Item_Code
-    data_df['Item_Code'] = data_df['Item_Code'].apply(
-        lambda x: str(x).strip() if pd.notna(x) else ''
-    )
-    
-    # Remove category headers (simple integer codes like "1", "2" with no values)
-    # KEEP category headers per user request
-    # data_df = data_df[~data_df.apply(is_category_header, axis=1)]
-    
-    # Reset index
-    data_df = data_df.reset_index(drop=True)
-    
-    # Convert numeric columns to float, fill NaN with 0
-    numeric_columns = column_names[2:]  # All columns except Item_Code and Trade
-    for col in numeric_columns:
-        if col in data_df.columns:
-            data_df[col] = pd.to_numeric(data_df[col], errors='coerce').fillna(0)
-    
-    # Clean Trade column - keep original formatting (don't strip leading spaces for sub-items)
-    data_df['Trade'] = data_df['Trade'].apply(
-        lambda x: str(x) if pd.notna(x) else ''
-    )
-    
-    return data_df
+        return pd.DataFrame(columns=['Year', 'Month', 'Sheet_Name', 'Financial_Type', 'Item_Code', 'Trade', 'Value'])
 
 
-if __name__ == '__main__':
-    excel_file = r'C:\Users\derri\.openclaw\media\inbound\file_5---f1932325-a544-44fe-a5d2-5235b24c1efb.xlsx'
+def parse_and_save(file_path, output_path=None):
+    """
+    Parse workbook and save to CSV.
+    """
+    df = parse_workbook(file_path)
     
-    print("Parsing Excel file...")
-    data = parse_excel_file(excel_file)
+    if output_path is None:
+        output_path = file_path.replace('.xlsx', '_flat.csv')
     
-    # Save metadata to JSON
-    metadata_file = r'C:\Users\derri\.openclaw\workspace\metadata.json'
-    with open(metadata_file, 'w') as f:
-        json.dump(data['metadata'], f, indent=2)
-    print(f"Saved metadata to: {metadata_file}")
+    df.to_csv(output_path, index=False)
+    print(f"Saved {len(df)} rows to {output_path}")
+    return df
+
+
+# Test with the sample file
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1:
+        file_path = sys.argv[1]
+    else:
+        file_path = "C:/Users/derri/.openclaw/media/inbound/file_13---f1726679-e4d8-439d-aaf1-292bcc355136.xlsx"
     
-    # Save each sheet to CSV
-    for sheet_name, df in data['sheets'].items():
-        csv_name = sheet_name.replace(" ", "_")
-        csv_path = rf'C:\Users\derri\.openclaw\workspace\{csv_name}.csv'
-        df.to_csv(csv_path, index=False)
-        print(f"Saved: {csv_path}")
-    
-    # Print summary
-    print("\n=== Summary ===")
-    print(f"Project: {data['metadata'].get('project_name', 'Unknown')}")
-    print(f"Code: {data['metadata'].get('project_code', 'Unknown')}")
-    print(f"Sheets: {list(data['sheets'].keys())}")
-    for sheet_name, df in data['sheets'].items():
-        print(f"  {sheet_name}: {len(df)} rows")
-        # Show first 5 items
-        print(f"    First items: {df['Trade'].head(5).tolist()}")
+    df = parse_workbook(file_path)
+    print(f"\nTotal rows: {len(df)}")
+    print(f"\nSample data:")
+    print(df.head(20).to_string())
+    print(f"\nUnique Financial Types:")
+    print(df['Financial_Type'].unique())
+    print(f"\nUnique Sheets:")
+    print(df['Sheet_Name'].unique())
