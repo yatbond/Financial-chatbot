@@ -2,6 +2,8 @@
 Financial Data Preprocessor
 Scans folders for Excel workbooks, converts to flat CSV format.
 Stores metadata for chatbot quick-loading.
+
+Supports both local G: drive and Google Drive API (for cloud deployment).
 """
 
 import os
@@ -14,7 +16,7 @@ METADATA_FILE = "financial_data_index.json"
 
 # Configuration
 DEFAULT_DATA_ROOT = "G:/My Drive/Ai Chatbot Knowledge Base"
-GDRIVE_SOURCE = "G:/My Drive/Ai Chatbot Knowledge Base"
+FALLBACK_GDRIVE_PATH = "Ai Chatbot Knowledge Base"  # For API access
 
 
 def find_excel_files(root_folder):
@@ -25,6 +27,37 @@ def find_excel_files(root_folder):
             if file.endswith(('.xlsx', '.xls')) and not file.startswith('~'):
                 excel_files.append(os.path.join(root, file))
     return excel_files
+
+
+def is_gdrive_available():
+    """Check if G: drive is available."""
+    return os.path.exists('G:/My Drive')
+
+
+def get_data_source_path():
+    """
+    Get the data source path.
+    Returns (path, source_type) where source_type is 'local' or 'api'.
+    """
+    # Check if G: drive is available (local machine)
+    if is_gdrive_available():
+        return DEFAULT_DATA_ROOT, 'local'
+    
+    # Try Google Drive API (for cloud deployment)
+    try:
+        from gdrive_api import load_credentials, find_excel_files_in_gdrive
+        if load_credentials():
+            files = find_excel_files_in_gdrive(FALLBACK_GDRIVE_PATH)
+            if files:
+                return FALLBACK_GDRIVE_PATH, 'api'
+    except ImportError:
+        pass
+    
+    # Fall back to local path anyway (might work on some setups)
+    if os.path.exists(DEFAULT_DATA_ROOT):
+        return DEFAULT_DATA_ROOT, 'local'
+    
+    return DEFAULT_DATA_ROOT, 'local'
 
 
 def get_subfolder_name(excel_path):
