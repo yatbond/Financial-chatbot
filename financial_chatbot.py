@@ -481,10 +481,6 @@ def handle_monthly_category(df, project, question):
     # Check each category keyword - longer phrases first to avoid partial matches
     sorted_keywords = sorted(category_keywords.items(), key=lambda x: len(x[0]), reverse=True)
 
-    # DEBUG: Show matching process
-    st.write(f"DEBUG: question='{question}', expanded='{question_expanded}'")
-    st.write(f"DEBUG: checking {len(sorted_keywords)} keywords...")
-
     for kw, prefix in sorted_keywords:
         # Check if keyword is in the expanded question
         # Use word boundary to avoid substring matches (e.g., "plant" in "materials")
@@ -493,10 +489,7 @@ def handle_monthly_category(df, project, question):
         if match:
             category_prefix = prefix
             category_name = kw
-            st.write(f"DEBUG: MATCHED! '{kw}' -> {prefix}")
             break
-    else:
-        st.write("DEBUG: No category matched!")
 
     if not is_monthly_query or not category_prefix:
         return None
@@ -521,7 +514,6 @@ def handle_monthly_category(df, project, question):
     if target_month is None:
         # Use the selected month from the report
         target_month = st.session_state.current_month
-        st.write(f"DEBUG: Using selected report month: {target_month}")
 
     # Financial types to check (excluding Financial Status which has all months)
     financial_types = ['Projection', 'Committed Cost', 'Accrual', 'Cash Flow']
@@ -534,33 +526,15 @@ def handle_monthly_category(df, project, question):
             (project_df['Month'] == target_month) &
             (project_df['Sheet_Name'] != 'Financial Status')
         ]
-        st.write(f"DEBUG: ft='{ft}', target_month={target_month}, filtered_len={len(filtered)}")
 
         # Sum all items with the same first 2 digits of Item_Code
         total = 0
-        sample_codes = []
         for _, row in filtered.iterrows():
             item_code = str(row['Item_Code'])
-            sample_codes.append(item_code[:20])  # First 20 chars
-            # Check if item_code starts with category_prefix (e.g., "2.2" matches "2.2.1")
             if item_code.startswith(category_prefix + '.') or item_code == category_prefix:
                 total += row['Value']
-                st.write(f"DEBUG: matched item_code={item_code}, value={row['Value']}")
 
-        st.write(f"DEBUG: ft='{ft}', total={total}, sample_codes={sample_codes[:5]}")
-        # Always include all financial types (even if 0)
         results[ft] = total
-
-    st.write(f"DEBUG: Using target_month={target_month} for category_prefix={category_prefix}")
-    st.write(f"DEBUG: results={results}, all_zero={all(v == 0 for v in results.values())}")
-    if all(v == 0 for v in results.values()):
-        # Show which financial types have data (even if 0)
-        response = f"## Monthly {display_name} ({target_month}/{st.session_state.current_year}) ('000)\n\n"
-        response += "*No data found for this category in the selected month.*\n"
-        for ft, value in results.items():
-            response += f"- **{ft}:** $0\n"
-        response += f"\n*Items with Item_Code starting with {category_prefix}.*"
-        return response, []
 
     # Map category keywords to display names
     category_display_names = {
@@ -588,6 +562,15 @@ def handle_monthly_category(df, project, question):
     # Get display name for the category
     display_name = category_display_names.get(category_name, category_name.title())
 
+    if all(v == 0 for v in results.values()):
+        # Show which financial types have data (even if 0)
+        response = f"## Monthly {display_name} ({target_month}/{st.session_state.current_year}) ('000)\n\n"
+        response += "*No data found for this category in the selected month.*\n"
+        for ft, value in results.items():
+            response += f"- **{ft}:** $0\n"
+        response += f"\n*Items with Item_Code starting with {category_prefix}.*"
+        return response, []
+
     # Format response - no total, just individual values
     response = f"## Monthly {display_name} ({target_month}/{st.session_state.current_year}) ('000)\n\n"
 
@@ -605,12 +588,8 @@ def answer_question(df, project, question, selected_filters=None):
 
     # Check for monthly category query first
     monthly_result = handle_monthly_category(df, project, question)
-    st.write(f"DEBUG: answer_question received monthly_result={monthly_result is not None}")
     if monthly_result:
-        st.write("DEBUG: Returning monthly_result!")
         return monthly_result
-
-    st.write("DEBUG: No monthly_result, continuing to find_best_matches")
 
     latest_month = project_df['Month'].max()
     target_month = latest_month
