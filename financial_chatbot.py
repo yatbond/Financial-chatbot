@@ -54,27 +54,29 @@ def get_drive_service():
     """Get Google Drive service."""
     if st.session_state.service is not None:
         return st.session_state.service
-    
+
     try:
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
-        
+
         creds = None
         if 'google_credentials' in st.secrets:
             creds = st.secrets['google_credentials']
             if isinstance(creds, str):
                 creds = json.loads(creds)
-        
+
         if creds is None:
+            st.error("No 'google_credentials' found in secrets")
             return None
-        
+
         credentials = service_account.Credentials.from_service_account_info(
-            creds, 
+            creds,
             scopes=['https://www.googleapis.com/auth/drive.readonly']
         )
         st.session_state.service = build('drive', 'v3', credentials=credentials)
         return st.session_state.service
-    except:
+    except Exception as e:
+        st.error(f"Failed to connect to Google Drive: {e}")
         return None
 
 def list_folders(service, parent_id=None):
@@ -105,16 +107,26 @@ def extract_project_info(filename):
 
 def load_folder_structure(service):
     """Load folder structure and list projects (fast - no data loading)."""
+    print("=== FUNCTION load_folder_structure called ===")
     folders = list_folders(service)
-    
+    print(f"Root folders: {[f['name'] for f in folders]}")
+
+    # Debug: Show all root folders on main page
+    st.write(f"**Debug: Root folders found: {[f['name'] for f in folders]}**")
+
     # Find root folder
     root_folder = None
     for f in folders:
         if f['name'] == 'Ai Chatbot Knowledge Base':
             root_folder = f['id']
             break
-    
+
+    print(f"Root folder found: {root_folder}")
+    st.write(f"**Debug: Root folder ID: {root_folder}**")
+
     if not root_folder:
+        st.error("Root folder 'Ai Chatbot Knowledge Base' not found!")
+        st.write("Your folder might have a different name. Check the debug output above.")
         return {}, {}
     
     # Find year folders
@@ -131,7 +143,7 @@ def load_folder_structure(service):
                 # Get CSV files in this month folder (with pagination)
                 all_csv_files = []
                 page_token = None
-                
+
                 while True:
                     csv_result = service.files().list(
                         query=f"'{m['id']}' in parents and name contains '_flat.csv' and trashed=false",
@@ -139,14 +151,15 @@ def load_folder_structure(service):
                         pageSize=100,
                         pageToken=page_token
                     ).execute()
-                    
+
                     all_csv_files.extend(csv_result.get('files', []))
                     page_token = csv_result.get('nextPageToken')
-                    
+
                     if page_token is None:
                         break
-                
+
                 if all_csv_files:
+                    st.write(f"**Found {len(all_csv_files)} files in {year}/{m['name']}**")
                     if year not in folders_with_data:
                         folders_with_data[year] = []
                     folders_with_data[year].append(m['name'])
@@ -156,9 +169,11 @@ def load_folder_structure(service):
                         code, name = extract_project_info(csv_file['name'])
                         if code:
                             project_list[csv_file['name']] = {'code': code, 'name': name, 'year': year, 'month': m['name']}
-        except:
+        except Exception as e:
+            st.error(f"Error processing {year}: {e}")
             continue
-    
+
+    st.write(f"**Debug: Total projects found: {len(project_list)}**")
     return folders_with_data, project_list
 
 def load_project_data(service, filename, year, month):
@@ -410,27 +425,29 @@ service = get_drive_service()
 
 st.title("📊 Financial Chatbot")
 
+print("=== START OF APP ===")
+print(f"service is None: {service is None}")
+
 if service is None:
     st.error("Could not connect to Google Drive")
     st.info("Check Streamlit secrets for 'google_credentials'")
 else:
     st.success("Connected to Google Drive ✓")
+    print("=== About to load folder structure ===")
 
 # Load folder structure (fast - no data)
 if not st.session_state.available_years:
+    print("=== Loading folder structure ===")
     with st.spinner("Loading folder structure..."):
         folders_with_data, project_list = load_folder_structure(service)
         st.session_state.folders_with_data = folders_with_data
         st.session_state.project_list = project_list
         st.session_state.available_years = sorted(folders_with_data.keys(), reverse=True)
         st.session_state.available_months = sorted(set(m for months in folders_with_data.values() for m in months))
-        
-        if st.session_state.available_years:
-            st.session_state.default_year = st.session_state.available_years[0]
-            latest_months = st.session_state.folders_with_data.get(st.session_state.default_year, [])
-            if latest_months:
-                sorted_months = sorted(latest_months, key=lambda x: int(x))
-                st.session_state.default_month = sorted_months[-1]
+
+        # Show debug info on main page
+        st.write(f"**Debug: Folders with data: {folders_with_data}**")
+        st.write(f"**Debug: Total projects found: {len(project_list)}**")
 
 # Year and Month selectors
 if st.session_state.available_years:
