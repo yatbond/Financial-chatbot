@@ -361,13 +361,17 @@ def answer_question(df, project, question):
     
     total_value = result_df['Value'].sum()
     
-    response = f"**{matched_value or question}**\n\n"
-    response += f"Value: **${total_value:,.0f}** ('000)\n"
-    response += f"Records found: {len(result_df)}\n"
-    response += f"Month: {target_month}/{target_year}\n"
+    # Get details from first record for reference
+    first_record = result_df.iloc[0]
     
-    if matched_column:
-        response += f"Matched from: {matched_column}\n"
+    response = f"## ${total_value:,.0f} ('000)\n\n"
+    response += f"**Year:** {first_record.get('_year', target_year)}\n"
+    response += f"**Month:** {first_record['Month']}\n"
+    response += f"**Sheet:** {first_record['Sheet_Name']}\n"
+    response += f"**Financial Type:** {first_record['Financial_Type']}\n"
+    response += f"**Item Code:** {first_record['Item_Code']}\n"
+    response += f"**Data Type:** {first_record['Data_Type']}\n"
+    response += f"\n*Records found: {len(result_df)}*"
     
     return response
 
