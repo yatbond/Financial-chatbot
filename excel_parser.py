@@ -52,6 +52,9 @@ def clean_text_value(val):
     # Remove leading '=' if present (Excel formula display)
     if text.startswith('='):
         text = text[1:]
+    # Add leading space if starts with '-' to prevent Excel formula auto-conversion
+    if text.startswith('-'):
+        text = ' ' + text
     return text
 
 
@@ -87,6 +90,58 @@ def get_merged_header_value(df, row_idx, col_idx):
     if pd.notna(val):
         return str(val).strip()
     return ""
+
+
+def get_parent_codes(item_code):
+    """Get parent codes from a tiered item code.
+    Example: "2.2.2" -> ["2", "2.2"]
+    Example: "2.2" -> ["2"]
+    Example: "2" -> []
+    """
+    if not item_code or '.' not in str(item_code):
+        return []
+    
+    parts = str(item_code).split('.')
+    if len(parts) <= 1:
+        return []
+    
+    parents = []
+    for i in range(1, len(parts)):
+        parent = '.'.join(parts[:i])
+        parents.append(parent)
+    return parents
+
+
+def build_combined_data_type(item_code, data_type, code_to_name_map):
+    """Build combined Data_Type name for tiered item codes.
+    Example: item_code="2.2.2", data_type="Steel", code_to_name_map={"2": "Category", "2.2": "Reinforcement"}
+    Result: "Reinforcement - Steel"
+    """
+    if not item_code or '.' not in str(item_code):
+        return data_type
+    
+    parents = get_parent_codes(item_code)
+    if not parents:
+        return data_type
+    
+    # Build combined name from parent to child
+    name_parts = []
+    for parent_code in parents:
+        parent_name = code_to_name_map.get(parent_code, '')
+        if parent_name and parent_name != data_type:
+            name_parts.append(parent_name)
+    
+    # Add current data_type
+    if data_type:
+        if data_type not in name_parts:
+            name_parts.append(data_type)
+    
+    if len(name_parts) > 1:
+        return ' - '.join(name_parts)
+    elif len(name_parts) == 1:
+        return name_parts[0]
+    else:
+        return data_type
 
 
 def parse_financial_status_sheet(xl, year=None, month=None):
@@ -130,14 +185,31 @@ def parse_financial_status_sheet(xl, year=None, month=None):
             if combined:
                 financial_types[col_idx] = combined
     
-    # Parse data rows (starting from row 15)
+    # First pass: collect all Item_Code -> Data_Type mappings
+    code_to_name_map = {}
     for row_idx in range(15, len(df)):
         item_code = get_merged_header_value(df, row_idx, 0)  # Column A
-        data_type = clean_text_value(df.iloc[row_idx, 1])  # Column B (was Trade, now Data_Type)
+        data_type = clean_text_value(df.iloc[row_idx, 1])  # Column B
         
         # Skip empty rows or header rows
         if not item_code or item_code in ['Item', '(HK$']:
             continue
+        
+        # Store mapping (use the first occurrence)
+        if item_code not in code_to_name_map:
+            code_to_name_map[item_code] = data_type
+    
+    # Second pass: parse data with combined Data_Type names
+    for row_idx in range(15, len(df)):
+        item_code = get_merged_header_value(df, row_idx, 0)  # Column A
+        raw_data_type = clean_text_value(df.iloc[row_idx, 1])  # Column B
+        
+        # Skip empty rows or header rows
+        if not item_code or item_code in ['Item', '(HK$']:
+            continue
+        
+        # Build combined Data_Type for tiered codes
+        data_type = build_combined_data_type(item_code, raw_data_type, code_to_name_map)
         
         # Parse numeric values for each financial type column
         for col_idx, fin_type in financial_types.items():
@@ -205,14 +277,31 @@ def parse_other_sheet(xl, sheet_name, base_year=None):
             if month:
                 time_columns[col_idx] = (month, col_year if col_year else year)
     
-    # Parse data rows (starting from row 12)
+    # First pass: collect all Item_Code -> Data_Type mappings
+    code_to_name_map = {}
     for row_idx in range(12, len(df)):
         item_code = get_merged_header_value(df, row_idx, 0)  # Column A
-        data_type = clean_text_value(df.iloc[row_idx, 1])  # Column B (was Trade, now Data_Type)
+        data_type = clean_text_value(df.iloc[row_idx, 1])  # Column B
         
         # Skip empty rows or header rows
         if not item_code or item_code in ['Item', '(HK$']:
             continue
+        
+        # Store mapping (use the first occurrence)
+        if item_code not in code_to_name_map:
+            code_to_name_map[item_code] = data_type
+    
+    # Second pass: parse data with combined Data_Type names
+    for row_idx in range(12, len(df)):
+        item_code = get_merged_header_value(df, row_idx, 0)  # Column A
+        raw_data_type = clean_text_value(df.iloc[row_idx, 1])  # Column B
+        
+        # Skip empty rows or header rows
+        if not item_code or item_code in ['Item', '(HK$']:
+            continue
+        
+        # Build combined Data_Type for tiered codes
+        data_type = build_combined_data_type(item_code, raw_data_type, code_to_name_map)
         
         # Get values for each time column
         for col_idx, (col_month, col_year) in time_columns.items():
