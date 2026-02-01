@@ -136,29 +136,37 @@ def get_project_metrics(df, project):
     else:
         latest_month = None
     
-    # Projected Gross Profit: Projection sheet, Gross Profit trades
-    proj = project_df[project_df['Sheet_Name'] == 'Projection']
+    # Filter by Item_Code = 3 and Data_Type contains "Gross Profit"
+    gp_filter = (project_df['Item_Code'] == 3) & \
+                (project_df['Data_Type'].str.contains('Gross Profit', case=False, na=False))
+    
+    # Business Plan GP: Sheet_Name = Financial Status, Financial_Type contains "Business Plan"
+    bp = project_df[(project_df['Sheet_Name'] == 'Financial Status') & 
+                    (project_df['Financial_Type'].str.contains('Business Plan', case=False, na=False)) &
+                    gp_filter]
+    if not bp.empty:
+        metrics['Business Plan GP'] = bp['Value'].sum()
+    
+    # Projected GP: Sheet_Name = Financial Status, Financial_Type contains "Projection"
+    proj = project_df[(project_df['Sheet_Name'] == 'Financial Status') & 
+                      (project_df['Financial_Type'].str.contains('Projection', case=False, na=False)) &
+                      gp_filter]
     if not proj.empty:
-        if latest_month:
-            proj = proj[proj['Month'] == latest_month]
-        gp = proj[proj['Data_Type'].str.contains('Gross Profit', case=False, na=False)]
-        if not gp.empty:
-            metrics['Projected GP'] = gp['Value'].sum()
+        metrics['Projected GP'] = proj['Value'].sum()
     
-    # WIP Gross Profit: Audit Report (WIP) J, Gross Profit trades
+    # WIP GP: Sheet_Name = Financial Status, Financial_Type contains "Audit Report"
     wip = project_df[(project_df['Sheet_Name'] == 'Financial Status') & 
-                     (project_df['Financial_Type'] == 'Audit Report (WIP) J')]
+                     (project_df['Financial_Type'].str.contains('Audit Report', case=False, na=False)) &
+                     gp_filter]
     if not wip.empty:
-        gp = wip[wip['Data_Type'].str.contains('Gross Profit', case=False, na=False)]
-        if not gp.empty:
-            metrics['WIP GP'] = gp['Value'].sum()
+        metrics['WIP GP'] = wip['Value'].sum()
     
-    # Cash Flow: Cash Flow sheet
-    cf = project_df[project_df['Sheet_Name'] == 'Cash Flow']
+    # Cash Flow: Sheet_Name = Financial Status, Financial_Type = "Cash Flow"
+    cf = project_df[(project_df['Sheet_Name'] == 'Financial Status') & 
+                    (project_df['Financial_Type'] == 'Cash Flow') &
+                    gp_filter]
     if not cf.empty:
-        gp = cf[cf['Data_Type'].str.contains('Gross Profit', case=False, na=False)]
-        if not gp.empty:
-            metrics['Cash Flow'] = gp['Value'].sum()
+        metrics['Cash Flow'] = cf['Value'].sum()
     
     return metrics
 
@@ -218,15 +226,17 @@ if st.session_state.data_loaded and st.session_state.projects:
         if metrics:
             st.markdown("### 💰 Key Metrics")
             
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             
+            bgp = metrics.get('Business Plan GP', 0)
             pgp = metrics.get('Projected GP', 0)
             wgp = metrics.get('WIP GP', 0)
             cf = metrics.get('Cash Flow', 0)
             
-            col1.metric("Projected GP (bf adj)", f"${pgp:,.0f}")
-            col2.metric("WIP GP (bf adj)", f"${wgp:,.0f}")
-            col3.metric("Cash Flow", f"${cf:,.0f}")
+            col1.metric("Business Plan GP", f"${bgp:,.0f}")
+            col2.metric("Projected GP (bf adj)", f"${pgp:,.0f}")
+            col3.metric("WIP GP (bf adj)", f"${wgp:,.0f}")
+            col4.metric("Cash Flow", f"${cf:,.0f}")
         else:
             st.warning("No metrics available for this project")
         
@@ -237,6 +247,7 @@ if st.session_state.data_loaded and st.session_state.projects:
             st.write(f"Total records: {len(project_df)}")
             st.write(f"Sheets: {project_df['Sheet_Name'].unique().tolist()}")
             st.write(f"Months: {sorted(project_df['Month'].unique())}")
+            st.write(f"Financial Types: {project_df['Financial_Type'].unique().tolist()}")
         
         # Show sample data
         with st.expander("📋 Sample Data", expanded=False):
