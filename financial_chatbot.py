@@ -7,9 +7,11 @@ import pandas as pd
 import json
 import re
 import os
+import io
 from io import StringIO
 
 KB_FILE = 'chatbot_knowledge_base.json'
+KB_DRIVE_FILE = 'chatbot_preferences.json'
 
 # Acronym mapping for easier searching
 ACRONYMS = {
@@ -32,20 +34,57 @@ def expand_acronyms(text):
         text_lower = re.sub(pattern, full, text_lower)
     return text_lower
 
-def load_knowledge_base():
-    """Load knowledge base from file."""
-    if os.path.exists(KB_FILE):
-        try:
-            with open(KB_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
+def load_knowledge_base_from_drive(service):
+    """Load knowledge base from Google Drive."""
+    try:
+        # Find the file
+        result = service.files().list(
+            q=f"name='{KB_DRIVE_FILE}' and trashed=false",
+            fields="files(id, name)"
+        ).execute()
 
-def save_knowledge_base(kb):
-    """Save knowledge base to file."""
-    with open(KB_FILE, 'w') as f:
-        json.dump(kb, f, indent=2)
+        files = result.get('files', [])
+        if not files:
+            return {}
+
+        file_id = files[0]['id']
+
+        # Download
+        request = service.files().get_media(fileId=file_id)
+        content = request.execute()
+        return json.loads(content.decode('utf-8'))
+    except:
+        return {}
+
+def save_knowledge_base_to_drive(service, kb):
+    """Save knowledge base to Google Drive."""
+    try:
+        # Check if file exists
+        result = service.files().list(
+            q=f"name='{KB_DRIVE_FILE}' and trashed=false",
+            fields="files(id)"
+        ).execute()
+
+        files = result.get('files', [])
+        content = json.dumps(kb, indent=2).encode('utf-8')
+
+        if files:
+            # Update existing file
+            file_id = files[0]['id']
+            service.files().update(
+                fileId=file_id,
+                media_body=io.BytesIO(content)
+            ).execute()
+        else:
+            # Create new file in root folder
+            file_metadata = {
+                'name': KB_DRIVE_FILE,
+                'mimeType': 'application/json'
+            }
+            media = io.BytesIO(content)
+            service.files().create(body=file_metadata, media_body=media).execute()
+    except Exception as e:
+        print(f"Error saving knowledge base: {e}")
 
 st.set_page_config(page_title="Financial Chatbot", page_icon="📊")
 
@@ -230,11 +269,14 @@ def load_project_data(service, filename, year, month):
         request = service.files().get_media(fileId=file_id)
         content = request.execute()
         df = pd.read_csv(StringIO(content.decode('utf-8')))
-        
+
+        # Add 1-based roll number (row number from CSV)
+        df['Roll'] = range(1, len(df) + 1)
+
         code, name = extract_project_info(filename)
         if code:
             df['_project'] = f"{code} - {name}"
-        
+
         return df
     except Exception as e:
         print(f"Error loading {filename}: {e}")
@@ -453,6 +495,10 @@ if service is None:
     st.info("Check Streamlit secrets for 'google_credentials'")
 else:
     st.success("Connected to Google Drive ✓")
+    # Load persistent knowledge base from Drive
+    kb = load_knowledge_base_from_drive(service)
+    if kb:
+        st.session_state.query_knowledge_base = kb
 
 # Load folder structure (fast - no data)
 if not st.session_state.available_years:
@@ -608,6 +654,8 @@ if st.session_state.data_loaded and st.session_state.df is not None:
                         st.session_state.query_knowledge_base[original_q] = match
                         if expanded_q != original_q:
                             st.session_state.query_knowledge_base[expanded_q] = match
+                        # Save to Drive for persistence across sessions
+                        save_knowledge_base_to_drive(service, st.session_state.query_knowledge_base)
                         st.session_state.pending_question = None
                         st.session_state.pending_matches = []
                         st.rerun()
@@ -631,6 +679,8 @@ if st.session_state.data_loaded and st.session_state.df is not None:
     
     if st.button("Reset Preferences"):
         st.session_state.query_knowledge_base = {}
+        # Clear preferences file on Drive
+        save_knowledge_base_to_drive(service, {})
         st.success("Preferences reset!")
         st.rerun()
     
