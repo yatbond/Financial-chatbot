@@ -341,12 +341,11 @@ def find_best_matches(df, search_text, project):
     agg_dict = {
         'Value': 'sum',
         'Month': 'first',
-        'Sheet_Name': 'first',  # Keep the actual sheet name
     }
     if roll_col:
         agg_dict[roll_col] = 'min'
 
-    # Group by Sheet_Name as well to preserve the actual sheet
+    # Group by Sheet_Name as well to preserve the actual sheet name
     all_combinations = project_df.groupby(['Sheet_Name', 'Financial_Type', 'Data_Type', 'Item_Code']).agg(agg_dict).reset_index()
 
     matches = []
