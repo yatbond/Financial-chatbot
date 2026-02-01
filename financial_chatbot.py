@@ -444,11 +444,11 @@ def handle_monthly_category(df, project, question):
     # Check if this is a monthly category query
     monthly_keywords = ['monthly']
     category_keywords = {
+        'plant and machinery': '2.3',
         'preliminaries': '2.1',
         'preliminary': '2.1',
         'materials': '2.2',
         'material': '2.2',
-        'plant and machinery': '2.3',
         'plant': '2.3',
         'machinery': '2.3',
         'labour': '2.4',
@@ -469,7 +469,9 @@ def handle_monthly_category(df, project, question):
     # Check if user is asking about monthly category
     is_monthly_query = any(kw in question_lower for kw in monthly_keywords)
     category_prefix = None
+    category_name = None
 
+    # Check each category keyword
     for kw, prefix in category_keywords.items():
         if kw in question_lower:
             category_prefix = prefix
