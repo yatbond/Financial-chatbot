@@ -101,11 +101,21 @@ def load_all_data(root_folder):
     Load all preprocessed CSV files.
     Returns combined DataFrame.
     """
+    # Check if data folder exists
+    if not os.path.exists(root_folder):
+        print(f"[WARN] Data folder not found: {root_folder}")
+        print("Returning empty dataset. Please configure the data path.")
+        return pd.DataFrame()
+    
     index_path = os.path.join(root_folder, METADATA_FILE)
     
     if not os.path.exists(index_path):
         print("No index found. Preprocessing...")
         preprocess_folder(root_folder)
+    
+    if not os.path.exists(index_path):
+        print(f"[WARN] Index file not found: {index_path}")
+        return pd.DataFrame()
     
     with open(index_path, 'r') as f:
         index = json.load(f)

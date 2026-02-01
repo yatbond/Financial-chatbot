@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 import pickle
 from pathlib import Path
-from financial_chatbot import initialize, get_projected_gross_profit, get_wip_gross_profit, get_cash_flow
+from financial_chatbot import initialize, query
 
 
 # Page config
@@ -32,15 +32,52 @@ def get_financial_summary():
     try:
         # Initialize the financial chatbot (uses G: drive data)
         initialize()
-        
-        return {
-            'projected_gross_profit': get_projected_gross_profit(),
-            'wip_gross_profit': get_wip_gross_profit(),
-            'cash_flow': get_cash_flow()
-        }
+
+        summary = get_financial_summary_dict()
+
+        return summary
     except Exception as e:
         st.error(f"Error loading financial data: {e}")
         return {'projected_gross_profit': 0, 'wip_gross_profit': 0, 'cash_flow': 0}
+
+
+def get_financial_summary_dict():
+    """Get financial summary as dict - used by both Streamlit and chatbot."""
+    from financial_chatbot import get_data, query
+    df = get_data()
+
+    if df.empty:
+        return {'projected_gross_profit': 0, 'wip_gross_profit': 0, 'cash_flow': 0}
+
+    # Projected Gross Profit: Projection sheet, Gross Profit trades
+    proj = query(Sheet_Name='Projection')
+    projected = 0
+    if not proj.empty:
+        gp = proj[proj['Trade'].str.contains('Gross Profit', case=False, na=False)]
+        if not gp.empty:
+            projected = gp['Value'].sum()
+
+    # WIP Gross Profit: Audit Report (WIP) J, Gross Profit trades
+    wip = query(Sheet_Name='Financial Status', Financial_Type='Audit Report (WIP) J')
+    wip_gp = 0
+    if not wip.empty:
+        gp = wip[wip['Trade'].str.contains('Gross Profit', case=False, na=False)]
+        if not gp.empty:
+            wip_gp = gp['Value'].sum()
+
+    # Cash Flow: Cash Flow sheet, Gross Profit trades
+    cf = query(Sheet_Name='Cash Flow')
+    cash = 0
+    if not cf.empty:
+        gp = cf[cf['Trade'].str.contains('Gross Profit', case=False, na=False)]
+        if not gp.empty:
+            cash = gp['Value'].sum()
+
+    return {
+        'projected_gross_profit': float(projected),
+        'wip_gross_profit': float(wip_gp),
+        'cash_flow': float(cash)
+    }
 
 
 def get_answer(data: dict, question: str, selected_sheet: str) -> str:
@@ -49,18 +86,18 @@ def get_answer(data: dict, question: str, selected_sheet: str) -> str:
     Uses simple keyword matching and data queries.
     """
     df = data['sheets'].get(selected_sheet, pd.DataFrame())
-    
+
     if df.empty:
         return "No data available for the selected sheet."
-    
+
     question = question.lower()
-    
+
     # Get column names for matching
     columns = [c.lower() for c in df.columns]
-    
+
     # Total of numeric columns
     numeric_cols = [c for c in df.columns if c not in ['Item_Code', 'Item_Name']]
-    
+
     # Common patterns
     if 'total' in question or 'sum' in question or 'how much' in question:
         # Find which column they're asking about
@@ -71,13 +108,13 @@ def get_answer(data: dict, question: str, selected_sheet: str) -> str:
         # Default to total of all numeric columns
         totals = {col: df[col].sum() for col in numeric_cols}
         return "Totals:\n" + "\n".join([f"- {k}: {v:,.2f}" for k, v in totals.items()])
-    
+
     elif 'average' in question or 'avg' in question:
         for col in numeric_cols:
             if col.lower() in question:
                 avg = df[col].mean()
                 return f"Average {col.replace('_', ' ')}: {avg:,.2f}"
-    
+
     elif 'max' in question or 'highest' in question:
         for col in numeric_cols:
             if col.lower() in question:
@@ -85,7 +122,7 @@ def get_answer(data: dict, question: str, selected_sheet: str) -> str:
                 max_row = df[df[col] == max_val]['Item_Name'].values
                 if len(max_row) > 0:
                     return f"Highest {col.replace('_', ' ')}: {max_val:,.2f} ({max_row[0]})"
-    
+
     elif 'min' in question or 'lowest' in question:
         for col in numeric_cols:
             if col.lower() in question:
@@ -93,56 +130,56 @@ def get_answer(data: dict, question: str, selected_sheet: str) -> str:
                 min_row = df[df[col] == min_val]['Item_Name'].values
                 if len(min_row) > 0:
                     return f"Lowest {col.replace('_', ' ')}: {min_val:,.2f} ({min_row[0]})"
-    
+
     elif 'count' in question or 'how many' in question:
         non_zero = (df[numeric_cols] > 0).sum().sum()
         return f"Total non-zero values across all numeric columns: {non_zero}"
-    
+
     elif 'item' in question or 'code' in question:
         # Show item breakdown
         return f"There are {len(df)} line items in {selected_sheet}. First 10:\n" + \
                df[['Item_Code', 'Item_Name']].head(10).to_string(index=False)
-    
+
     elif 'row' in question or 'line' in question:
         return f"There are {len(df)} data rows (line items) in {selected_sheet}."
-    
+
     elif 'budget' in question:
         if 'budget' in columns:
             total = df['Budget_1st'].sum()
             return f"Total Budget (1st Working): {total:,.2f}"
-    
+
     elif 'committed' in question:
         if 'committed_value' in columns:
             total = df['Committed_Value'].sum()
             return f"Total Committed Value: {total:,.2f}"
-    
+
     elif 'accrual' in question:
         if 'accrual' in columns:
             total = df['Accrual'].sum()
             return f"Total Accrual: {total:,.2f}"
-    
+
     elif 'cash' in question:
         if 'cash_flow' in columns:
             total = df['Cash_Flow'].sum()
             return f"Total Cash Flow: {total:,.2f}"
-    
+
     elif 'balance' in question:
         if 'balance' in columns:
             total = df['Balance'].sum()
             return f"Total Balance: {total:,.2f}"
-    
+
     elif 'projection' in question:
         if 'projection' in columns:
             total = df['Projection'].sum()
             return f"Total Projection: {total:,.2f}"
-    
+
     else:
         # Generic search in Item_Name
         matches = df[df['Item_Name'].str.lower().str.contains(question, na=False)]
         if len(matches) > 0:
             return f"Found {len(matches)} items matching '{question}':\n\n" + \
                    matches[['Item_Code', 'Item_Name'] + numeric_cols[:3]].head(10).to_string(index=False)
-    
+
     return f"I couldn't understand the question about '{question}'. Try asking about:\n" \
            f"- Total [column name]\n" \
            f"- Average [column name]\n" \
@@ -160,7 +197,8 @@ def main():
     try:
         initialize()
     except Exception as e:
-        st.error(f"Error initializing: {e}")
+        st.warning("Data folder not configured. Please set up the data path.")
+        st.info("Configure DEFAULT_DATA_ROOT in financial_preprocessor.py to point to your Excel files.")
         return
     
     # Get financial summary using correct query functions
@@ -195,7 +233,7 @@ def main():
         
         # Generate response using financial_chatbot query
         with st.chat_message("assistant"):
-            from financial_chatbot import query
+            from financial_chatbot import query, get_data
             response = answer_question(prompt)
             st.markdown(response)
         
@@ -205,19 +243,24 @@ def main():
 
 def answer_question(question):
     """Answer questions using financial_chatbot query functions."""
+    from financial_chatbot import get_data, query
+    from financial_chatbot import get_projected_gross_profit as get_projected
+    from financial_chatbot import get_wip_gross_profit as get_wip
+    from financial_chatbot import get_cash_flow as get_cf
+    
     question = question.lower()
     
     # Check for specific financial metrics
     if 'projected gross profit' in question:
-        val = get_projected_gross_profit()
+        val = get_projected()
         return f"Projected Gross Profit (before adjustment): ${val:,.2f}"
     
     if 'wip gross profit' in question or 'wip gp' in question:
-        val = get_wip_gross_profit()
+        val = get_wip()
         return f"WIP Gross Profit (before adjustment): ${val:,.2f}"
     
     if 'cash flow' in question:
-        val = get_cash_flow()
+        val = get_cf()
         return f"Cash Flow: ${val:,.2f}"
     
     if 'total' in question or 'sum' in question:
@@ -236,42 +279,42 @@ def answer_question(question):
         result = query(Sheet_Name='Projection')
         if not result.empty:
             return f"Projection data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
-    
+
     if 'audit report' in question or 'wip' in question:
         result = query(Sheet_Name='Financial Status', Financial_Type='Audit Report (WIP) J')
         if not result.empty:
             return f"Audit Report (WIP) data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
-    
+
     if 'financial status' in question:
         result = query(Sheet_Name='Financial Status')
         if not result.empty:
             return f"Financial Status data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
-    
+
     if 'cash flow' in question:
         result = query(Sheet_Name='Cash Flow')
         if not result.empty:
             return f"Cash Flow data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
-    
+
     if 'accrual' in question:
         result = query(Sheet_Name='Accrual')
         if not result.empty:
             return f"Accrual data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
-    
+
     if 'committed cost' in question:
         result = query(Sheet_Name='Committed Cost')
         if not result.empty:
             return f"Committed Cost data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
-    
+
     if 'budget' in question:
         result = query(Financial_Type='1st Working Budget B')
         if not result.empty:
             return f"1st Working Budget data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
-    
+
     if 'tender' in question:
         result = query(Financial_Type='Tender A')
         if not result.empty:
             return f"Tender A data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
-    
+
     if 'gross profit' in question:
         result = query()
         if not result.empty:
@@ -279,13 +322,13 @@ def answer_question(question):
             gp = result[result['Trade'].str.contains('Gross Profit', case=False, na=False)]
             if not gp.empty:
                 return f"Gross Profit data: {len(gp)} records\nTotal value: ${gp['Value'].sum():,.2f}"
-    
+
     if 'item' in question:
         result = query()
         if not result.empty:
             items = result['Item_Code'].unique()
             return f"Available Item Codes: {len(items)} items\nExamples: {', '.join(items[:10])}"
-    
+
     return f"I found {len(query())} total records in the financial database. Try asking about:\n" \
            f"- Projected Gross Profit\n" \
            f"- WIP Gross Profit\n" \

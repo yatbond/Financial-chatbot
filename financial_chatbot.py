@@ -23,6 +23,14 @@ def initialize(data_root=None, force_reprocess=False):
     
     print(f"Initializing Financial Chatbot...")
     print(f"Data root: {root}")
+    
+    # Check if data folder exists
+    if not os.path.exists(root):
+        print(f"[WARN] Data folder not found: {root}")
+        print("Please configure the data path to point to your Excel files.")
+        _data_cache = pd.DataFrame()
+        return _data_cache
+    
     print(f"Force reprocess: {force_reprocess}")
     
     if force_reprocess:
@@ -32,9 +40,12 @@ def initialize(data_root=None, force_reprocess=False):
     print("\nLoading preprocessed data...")
     _data_cache = load_all_data(root)
     
-    print(f"\n[OK] Financial Chatbot Ready!")
-    print(f"  Total records: {len(_data_cache) if not _data_cache.empty else 0}")
-    print(f"  Data index: {os.path.join(root, METADATA_FILE)}")
+    if _data_cache.empty:
+        print("[WARN] No data loaded. Please add Excel files to the data folder.")
+    else:
+        print(f"\n[OK] Financial Chatbot Ready!")
+        print(f"  Total records: {len(_data_cache)}")
+        print(f"  Data index: {os.path.join(root, METADATA_FILE)}")
     
     return _data_cache
 
