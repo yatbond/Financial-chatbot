@@ -527,13 +527,29 @@ def handle_monthly_category(df, project, question):
     matching_codes = project_df[project_df['Item_Code'].astype(str).str.startswith(category_prefix + '.')]['Item_Code'].unique().tolist()
     st.write(f"DEBUG: Item_Codes starting with {category_prefix}.: {matching_codes[:10]}")
 
+    # Check if Financial_Status sheet has the data we need
+    financial_status_data = project_df[
+        (project_df['Sheet_Name'] == 'Financial Status') &
+        (project_df['Month'] == target_month) &
+        (project_df['Item_Code'].astype(str).str.startswith(category_prefix + '.'))
+    ]
+    st.write(f"DEBUG: Financial Status data for month {target_month}, category {category_prefix}: {len(financial_status_data)} rows")
+
     results = {}
     for ft in financial_types:
-        # Filter by Sheet_Name (not Financial_Type) since Sheet_Name matches the report type
+        # First try to find data in individual sheets
         filtered = project_df[
             (project_df['Sheet_Name'] == ft) &
             (project_df['Month'] == target_month)
         ]
+
+        # If no data in individual sheets, check Financial Status
+        if len(filtered) == 0:
+            filtered = project_df[
+                (project_df['Sheet_Name'] == 'Financial Status') &
+                (project_df['Financial_Type'] == ft) &
+                (project_df['Month'] == target_month)
+            ]
 
         # Sum all items with the same first 2 digits of Item_Code
         total = 0
