@@ -11,6 +11,27 @@ from io import StringIO
 
 KB_FILE = 'chatbot_knowledge_base.json'
 
+# Acronym mapping for easier searching
+ACRONYMS = {
+    'gp': 'gross profit',
+    'np': 'net profit',
+    'subcon': 'subcontractor',
+    'projected': 'projection',
+    'rebar': 'reinforcement',
+    'staff': 'manpower (mgt. & supervision)',
+    'labour': 'manpower (labour)',
+    'labor': 'manpower (labour)',
+}
+
+def expand_acronyms(text):
+    """Expand acronyms to full terms for better matching."""
+    text_lower = text.lower()
+    for acronym, full in ACRONYMS.items():
+        # Replace whole word matches only
+        pattern = r'\b' + re.escape(acronym) + r'\b'
+        text_lower = re.sub(pattern, full, text_lower)
+    return text_lower
+
 def load_knowledge_base():
     """Load knowledge base from file."""
     if os.path.exists(KB_FILE):
@@ -258,7 +279,9 @@ def get_project_metrics(df, project):
 def find_best_matches(df, search_text, project):
     """Find best matches for a query."""
     project_df = df[df['_project'] == project]
-    search_lower = search_text.lower()
+    # Expand acronyms for better matching
+    search_expanded = expand_acronyms(search_text)
+    search_lower = search_expanded.lower()
     search_words = search_lower.split()
     
     target_item_code = None
@@ -266,6 +289,8 @@ def find_best_matches(df, search_text, project):
         target_item_code = '7'
     elif 'after adjustment' in search_lower or 'adjusted' in search_lower:
         target_item_code = '5'
+    elif 'gross profit' in search_lower:
+        target_item_code = '3'
     
     all_combinations = project_df.groupby(['Financial_Type', 'Data_Type', 'Item_Code']).agg({
         'Value': 'sum',
@@ -525,9 +550,10 @@ if st.session_state.data_loaded and st.session_state.df is not None:
     
     # Chatbot
     st.markdown("### 💬 Ask about this Project ('000)")
-    
+    st.caption("💡 Shortcuts: GP=Gross Profit, NP=Net Profit, Subcon=Subcontractor, Rebar=Reinforcement")
+
     with st.form("chat_form"):
-        user_question = st.text_input("Your question:", placeholder="e.g., What is the Net Profit?")
+        user_question = st.text_input("Your question:", placeholder="e.g., What is the NP? or What is the Projected GP?")
         submitted = st.form_submit_button("Ask")
         
         if submitted and user_question:
