@@ -423,6 +423,7 @@ def answer_question(df, project, question):
 def find_best_match_in_column(df, search_text, column_name):
     """
     Find the best matching value in a specific column using fuzzy search.
+    Prioritizes specific term matches over common terms.
     Returns the best matching value or None.
     """
     search_lower = search_text.lower()
@@ -435,19 +436,34 @@ def find_best_match_in_column(df, search_text, column_name):
         value_lower = str(value).lower()
         score = 0
         
-        # Direct substring match
+        # Direct substring match (high priority)
         if search_lower in value_lower:
-            score += 10
+            score += 100
         
-        # Word-by-word matching
-        search_words = set(search_lower.split())
-        value_words = set(value_lower.split())
-        score += len(search_words & value_words) * 5
+        # Check for specific term matches (higher priority)
+        search_words = search_lower.split()
+        value_words = value_lower.split()
         
-        # Exact word match bonus
+        # Count matching words
+        matched_words = 0
         for word in search_words:
             if word in value_words and len(word) > 2:
-                score += 3
+                matched_words += 1
+        
+        # Word match bonus (moderate priority)
+        score += matched_words * 10
+        
+        # Bonus if BOTH "net" AND "profit" are found (for "Net Profit" queries)
+        if 'net' in search_words and 'profit' in search_words:
+            if 'net' in value_words and 'profit' in value_words:
+                score += 50  # Major bonus for "Net Profit" match
+        
+        # Penalty for common/generic terms
+        # "Gross Profit" is very common, so it shouldn't automatically win
+        if 'gross' in value_lower and 'profit' in value_lower:
+            # Check if user specifically asked for "net profit"
+            if 'net' not in search_lower:
+                score -= 5  # Small penalty for generic "gross profit"
         
         if score > best_score:
             best_score = score
