@@ -588,8 +588,12 @@ def answer_question(df, project, question, selected_filters=None):
 
     # Check for monthly category query first
     monthly_result = handle_monthly_category(df, project, question)
+    st.write(f"DEBUG: answer_question received monthly_result={monthly_result is not None}")
     if monthly_result:
+        st.write("DEBUG: Returning monthly_result!")
         return monthly_result
+
+    st.write("DEBUG: No monthly_result, continuing to find_best_matches")
 
     latest_month = project_df['Month'].max()
     target_month = latest_month
