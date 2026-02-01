@@ -248,52 +248,98 @@ def get_project_metrics(df, project):
 def find_best_match(df, search_text):
     """
     Find the best matching Financial_Type or Data_Type based on search text.
+    Prioritizes exact matches and key financial terms.
     Returns (matched_column, matched_value, matched_df)
     """
     search_lower = search_text.lower()
+    
+    # Key financial term mappings (user input -> expected terms)
+    term_mappings = {
+        'net profit': ['net profit', 'net income', 'net loss'],
+        'gross profit': ['gross profit'],
+        'revenue': ['revenue', 'income', 'sales'],
+        'cost': ['cost', 'expense'],
+        'profit': ['profit', 'income'],
+        'tender': ['tender'],
+        'budget': ['budget'],
+        'projection': ['projection'],
+        'wip': ['work in progress', 'wip'],
+        'audit': ['audit'],
+        'committed': ['committed'],
+        'accrual': ['accrual'],
+        'cash flow': ['cash flow'],
+    }
     
     # Get unique values from Financial_Type and Data_Type
     financial_types = df['Financial_Type'].dropna().unique().tolist()
     data_types = df['Data_Type'].dropna().unique().tolist()
     
-    best_match = None
-    best_score = 0
-    matched_column = None
+    all_values = []
     
-    # Score each potential match
+    # Process Financial_Type values
     for ft in financial_types:
-        score = 0
         ft_lower = ft.lower()
+        score = 0
         
         # Direct substring match
         if search_lower in ft_lower:
             score += 10
+        
+        # Check key term mappings
+        for term_key, expected_terms in term_mappings.items():
+            if term_key in search_lower:
+                for expected in expected_terms:
+                    if expected in ft_lower:
+                        score += 20  # High score for key terms
+                        break
+        
         # Word-by-word matching
         search_words = set(search_lower.split())
         ft_words = set(ft_lower.split())
         score += len(search_words & ft_words) * 5
         
-        if score > best_score:
-            best_score = score
-            best_match = ft
-            matched_column = 'Financial_Type'
-    
-    for dt in data_types:
-        score = 0
-        dt_lower = dt.lower()
+        # Penalize if matched column was not what user likely intended
+        if 'financial' in search_lower or 'type' in search_lower:
+            score += 10  # Boost Financial_Type if user asks for financial type
         
+        all_values.append({'value': ft, 'column': 'Financial_Type', 'score': score})
+    
+    # Process Data_Type values
+    for dt in data_types:
+        dt_lower = dt.lower()
+        score = 0
+        
+        # Direct substring match
         if search_lower in dt_lower:
             score += 10
+        
+        # Check key term mappings
+        for term_key, expected_terms in term_mappings.items():
+            if term_key in search_lower:
+                for expected in expected_terms:
+                    if expected in dt_lower:
+                        score += 20  # High score for key terms
+                        break
+        
+        # Word-by-word matching
         search_words = set(search_lower.split())
         dt_words = set(dt_lower.split())
         score += len(search_words & dt_words) * 5
         
-        if score > best_score:
-            best_score = score
-            best_match = dt
-            matched_column = 'Data_Type'
+        # Penalize if matched column was not what user likely intended
+        if 'data' in search_lower or 'type' in search_lower:
+            score += 10  # Boost Data_Type if user asks for data type
+        
+        all_values.append({'value': dt, 'column': 'Data_Type', 'score': score})
     
-    return matched_column, best_match
+    # Sort by score descending and return best match
+    all_values.sort(key=lambda x: x['score'], reverse=True)
+    
+    if all_values and all_values[0]['score'] > 0:
+        best = all_values[0]
+        return best['column'], best['value']
+    
+    return None, None
 
 
 def answer_question(df, project, question):
