@@ -534,6 +534,11 @@ def handle_monthly_category(df, project, question):
         (project_df['Item_Code'].astype(str).str.startswith(category_prefix + '.'))
     ]
 
+    # Find what months have data for this category prefix
+    category_data = project_df[project_df['Item_Code'].astype(str).str.startswith(category_prefix + '.')]
+    months_with_data = sorted(category_data['Month'].unique().tolist())
+    st.write(f"DEBUG: Months with {category_prefix}.x data: {months_with_data}")
+
     results = {}
     for ft in financial_types:
         # First try to find data in individual sheets
@@ -542,13 +547,14 @@ def handle_monthly_category(df, project, question):
             (project_df['Month'] == target_month)
         ]
 
-        # If no data in individual sheets, check Financial Status
+        # If no data in individual sheets, check Financial Status with partial match
         if len(filtered) == 0:
             filtered = project_df[
                 (project_df['Sheet_Name'] == 'Financial Status') &
-                (project_df['Financial_Type'] == ft) &
+                (project_df['Financial_Type'].str.contains(ft, case=False, na=False)) &
                 (project_df['Month'] == target_month)
             ]
+            st.write(f"DEBUG: Checking Financial Status for '{ft}': {len(filtered)} rows")
 
         # Sum all items with the same first 2 digits of Item_Code
         total = 0
@@ -560,6 +566,7 @@ def handle_monthly_category(df, project, question):
                 matched_count += 1
 
         results[ft] = total
+        st.write(f"DEBUG: ft='{ft}', total={total}, matched_count={matched_count}, filtered_len={len(filtered)}")
 
     # Map category keywords to display names
     category_display_names = {
