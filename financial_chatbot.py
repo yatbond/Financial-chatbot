@@ -282,7 +282,6 @@ def find_best_matches(df, search_text, project):
         
         score = 0
         
-        # Score based on word matches
         for word in search_words:
             if len(word) < 2:
                 continue
@@ -295,26 +294,47 @@ def find_best_matches(df, search_text, project):
             if word in dt:
                 score += 10
             
-            # Bonus for exact term matches
-            if 'projection' in search_lower and 'projection' in ft:
-                score += 20
-            if 'budget' in search_lower and 'budget' in ft:
-                score += 20
-            if 'audit' in search_lower and 'audit' in ft:
-                score += 20
-            if 'business plan' in search_lower and 'business plan' in ft:
-                score += 20
-            if 'cash flow' in search_lower and 'cash flow' in ft:
-                score += 20
+            # Special bonuses for specific term matches
+            # "projected" -> "projection" in Financial_Type
+            if word == 'projected' and 'projection' in ft:
+                score += 30
             
-            if 'gross profit' in search_lower and 'gross profit' in dt:
-                score += 20
-            if 'net profit' in search_lower and 'net profit' in dt:
-                score += 20
-            if 'income' in search_lower and 'income' in dt:
-                score += 20
-            if 'cost' in search_lower and 'cost' in dt:
-                score += 20
+            # "budget" in Financial_Type
+            if word == 'budget' and 'budget' in ft:
+                score += 30
+            
+            # "audit" in Financial_Type
+            if word == 'audit' and 'audit' in ft:
+                score += 30
+            
+            # "business" in Financial_Type
+            if word == 'business' and 'business' in ft:
+                score += 30
+            
+            # "cash" in Financial_Type
+            if word == 'cash' and 'cash' in ft:
+                score += 30
+        
+        # Additional bonuses for key terms
+        if 'projection' in search_lower and 'projection' in ft:
+            score += 20
+        if 'budget' in search_lower and 'budget' in ft:
+            score += 20
+        if 'audit' in search_lower and 'audit' in ft:
+            score += 20
+        if 'business plan' in search_lower and 'business plan' in ft:
+            score += 20
+        if 'cash flow' in search_lower and 'cash flow' in ft:
+            score += 20
+        
+        if 'gross profit' in search_lower and 'gross profit' in dt:
+            score += 20
+        if 'net profit' in search_lower and 'net profit' in dt:
+            score += 20
+        if 'income' in search_lower and 'income' in dt:
+            score += 20
+        if 'cost' in search_lower and 'cost' in dt:
+            score += 20
         
         if score > 0:
             matches.append({
