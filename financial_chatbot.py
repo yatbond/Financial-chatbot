@@ -124,6 +124,14 @@ def extract_project_info(filename):
         return code, project_name
     return None, name
 
+
+def sort_projects(projects_dict):
+    """
+    Sort projects by numeric project code (not alphabetically).
+    Example: 932 comes before 1042, not after.
+    """
+    return dict(sorted(projects_dict.items(), key=lambda x: int(x[0].split(' - ')[0]) if x[0].split(' - ')[0].isdigit() else float('inf')))
+
 def load_csv_files_for_period(service, selected_year, selected_month):
     """Load CSV files for selected year and month."""
     all_dfs = []
@@ -345,13 +353,15 @@ def find_best_matches(df, search_text, project):
         
         if score > 0:
             matches.append({
+                'Sheet_Name': 'Financial Status',
                 'Financial_Type': row['Financial_Type'],
                 'Data_Type': row['Data_Type'],
                 'Value': value,
                 'Month': month,
                 'Item_Code': item_code,
                 'score': score,
-                'matched_count': matched_count
+                'matched_count': matched_count,
+                '_year': row.get('_year', st.session_state.current_year) if hasattr(st.session_state, 'current_year') else 2025
             })
     
     # Sort by score descending, then by matched_count
@@ -561,7 +571,9 @@ if st.session_state.data_loaded and st.session_state.projects:
     
     st.markdown(f"### 🏗️ Select Project ({st.session_state.current_month} {st.session_state.current_year})")
     
-    project_options = ["-- Select a project --"] + sorted(projects.keys())
+    # Sort projects by numeric code (not alphabetically)
+    sorted_project_keys = sorted(projects.keys(), key=lambda x: int(x.split(' - ')[0]) if x.split(' - ')[0].isdigit() else float('inf'))
+    project_options = ["-- Select a project --"] + sorted_project_keys
     selected = st.selectbox("Choose a project:", project_options)
     
     if selected != "-- Select a project --":
@@ -622,9 +634,11 @@ if st.session_state.data_loaded and st.session_state.projects:
             st.markdown("*Multiple matches found. Please select:*")
             
             for i, match in enumerate(st.session_state.pending_matches[:10]):  # Show top 10
-                col1, col2 = st.columns([3, 1])
+                col1, col2 = st.columns([4, 1])
+                # Format: Sheet_Name → Financial_Type → Data_Type → Item_Code → Year → Month → Value
+                match_label = f"Financial Status → {match['Financial_Type']} → {match['Data_Type']} → Item:{match['Item_Code']} → {match.get('_year', st.session_state.current_year)}/{match['Month']} → ${match['Value']:,.0f}"
                 with col1:
-                    st.write(f"• {match['Financial_Type']} → {match['Data_Type']}")
+                    st.write(f"{i+1}. {match_label}")
                 with col2:
                     if st.button(f"Select", key=f"select_{i}"):
                         response, _ = answer_question(
