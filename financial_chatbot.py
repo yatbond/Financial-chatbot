@@ -292,11 +292,17 @@ def find_best_matches(df, search_text, project):
     elif 'gross profit' in search_lower:
         target_item_code = '3'
     
-    all_combinations = project_df.groupby(['Financial_Type', 'Data_Type', 'Item_Code']).agg({
+    # Check if Roll column exists
+    has_roll = 'Roll' in project_df.columns
+
+    agg_dict = {
         'Value': 'sum',
         'Month': 'first',
-        'Roll': 'min'  # Get the minimum roll number for this group
-    }).reset_index()
+    }
+    if has_roll:
+        agg_dict['Roll'] = 'min'  # Get the minimum roll number for this group
+
+    all_combinations = project_df.groupby(['Financial_Type', 'Data_Type', 'Item_Code']).agg(agg_dict).reset_index()
 
     matches = []
 
@@ -358,17 +364,19 @@ def find_best_matches(df, search_text, project):
                 score += 30
         
         if score > 0:
-            matches.append({
+            match_data = {
                 'Sheet_Name': 'Financial Status',
                 'Financial_Type': row['Financial_Type'],
                 'Data_Type': row['Data_Type'],
                 'Value': value,
                 'Month': month,
                 'Item_Code': item_code,
-                'Roll': row['Roll'],
                 'score': score,
                 'matched_count': matched_count
-            })
+            }
+            if has_roll:
+                match_data['Roll'] = row['Roll']
+            matches.append(match_data)
     
     matches.sort(key=lambda x: (x['score'], x['matched_count']), reverse=True)
     return matches
@@ -577,8 +585,11 @@ if st.session_state.data_loaded and st.session_state.df is not None:
         
         for i, match in enumerate(st.session_state.pending_matches[:10]):
             col1, col2 = st.columns([4, 1])
-            roll_num = match.get('Roll', '?')
-            match_label = f"Financial Status → {match['Financial_Type']} → {match['Data_Type']} → Item:{match['Item_Code']} → {selected_year}/{match['Month']} → ${match['Value']:,.0f} (roll {roll_num})"
+            roll_num = match.get('Roll')
+            if roll_num is not None:
+                match_label = f"Financial Status → {match['Financial_Type']} → {match['Data_Type']} → Item:{match['Item_Code']} → {selected_year}/{match['Month']} → ${match['Value']:,.0f} (roll {roll_num})"
+            else:
+                match_label = f"Financial Status → {match['Financial_Type']} → {match['Data_Type']} → Item:{match['Item_Code']} → {selected_year}/{match['Month']} → ${match['Value']:,.0f}"
             with col1:
                 st.write(f"{i+1}. {match_label}")
             with col2:
