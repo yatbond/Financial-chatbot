@@ -445,6 +445,21 @@ if not st.session_state.available_years:
         st.session_state.available_years = sorted(year_months.keys(), reverse=True)
         st.session_state.year_months = year_months
         st.session_state.available_months = sorted(all_months)
+        
+        # Pre-select the latest year (first one in the sorted list)
+        if st.session_state.available_years:
+            st.session_state.default_year = st.session_state.available_years[0]
+            # Get the latest month in that year
+            latest_months = st.session_state.year_months.get(st.session_state.default_year, [])
+            if latest_months:
+                # Sort months numerically
+                sorted_months = sorted(latest_months, key=lambda x: int(x))
+                st.session_state.default_month = sorted_months[-1]  # Latest month
+            else:
+                st.session_state.default_month = None
+        else:
+            st.session_state.default_year = None
+            st.session_state.default_month = None
 
 # Year and Month selectors
 if st.session_state.available_years:
@@ -453,13 +468,31 @@ if st.session_state.available_years:
     col1, col2 = st.columns(2)
     
     with col1:
-        selected_year = st.selectbox("Year:", st.session_state.available_years)
+        # Pre-select the latest year
+        default_year_idx = 0
+        if 'default_year' in st.session_state and st.session_state.default_year:
+            try:
+                default_year_idx = st.session_state.available_years.index(st.session_state.default_year)
+            except:
+                pass
+        selected_year = st.selectbox("Year:", st.session_state.available_years, index=default_year_idx)
     
     with col2:
         available_months = st.session_state.year_months.get(selected_year, [])
         if not available_months:
             available_months = st.session_state.available_months
-        selected_month = st.selectbox("Month:", sorted(available_months))
+        
+        # Sort months numerically for proper ordering
+        sorted_months = sorted(available_months, key=lambda x: int(x))
+        
+        # Pre-select the latest month
+        default_month_idx = len(sorted_months) - 1
+        if 'default_month' in st.session_state and st.session_state.default_month:
+            try:
+                default_month_idx = sorted_months.index(st.session_state.default_month)
+            except:
+                pass
+        selected_month = st.selectbox("Month:", sorted_months, index=default_month_idx)
     
     if st.button("Load Data"):
         with st.spinner(f"Loading data for {selected_month} {selected_year}..."):
