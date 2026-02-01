@@ -378,32 +378,83 @@ def answer_question(df, project, question):
     # Check for Gross Profit
     is_gross_profit = 'gross profit' in question_lower or 'gp' in question_lower
     
-    # Find best match from Financial_Type or Data_Type
-    matched_column, matched_value = find_best_match(df, question)
+    # Define Financial_Type search terms
+    ft_search_terms = {
+        'projection': 'projection',
+        'budget': 'budget',
+        'tender': 'tender',
+        'audit': 'audit',
+        'business plan': 'business plan',
+        'committed': 'committed',
+        'accrual': 'accrual',
+        'cash flow': 'cash flow',
+        'revision': 'revision',
+        'adjustment': 'adjustment',
+    }
+    
+    # Define Data_Type search terms
+    dt_search_terms = {
+        'net profit': 'net profit',
+        'gross profit': 'gross profit',
+        'income': 'income',
+        'revenue': 'revenue',
+        'cost': 'cost',
+        'claim': 'claim',
+        'variation': 'variation',
+        'fluctuation': 'fluctuation',
+    }
+    
+    # Find Financial_Type match
+    ft_match = None
+    for search_term, ft_keyword in ft_search_terms.items():
+        if search_term in question_lower:
+            # Find matching Financial_Type
+            for ft in project_df['Financial_Type'].dropna().unique():
+                if ft_keyword in ft.lower():
+                    ft_match = ft
+                    break
+            if ft_match:
+                break
+    
+    # Find Data_Type match
+    dt_match = None
+    for search_term, dt_keyword in dt_search_terms.items():
+        if search_term in question_lower:
+            # Find matching Data_Type
+            for dt in project_df['Data_Type'].dropna().unique():
+                if dt_keyword in dt.lower():
+                    dt_match = dt
+                    break
+            if dt_match:
+                break
+    
+    # If no specific terms found, use general fuzzy matching
+    if ft_match is None and dt_match is None:
+        ft_match, dt_match = find_best_match(df, question)
     
     # Build filter
     filters = {
-        'Sheet_Name': 'Financial Status',  # Default to Financial Status sheet
+        'Sheet_Name': 'Financial Status',
         'Month': target_month,
     }
     
     if item_code:
         filters['Item_Code'] = item_code
     
-    if matched_column and matched_value:
-        filters[matched_column] = matched_value
+    if ft_match:
+        filters['Financial_Type'] = ft_match
+    
+    if dt_match:
+        filters['Data_Type'] = dt_match
     
     # Apply filters
     result_df = project_df.copy()
     for col, val in filters.items():
         result_df = result_df[result_df[col] == val]
     
-    if is_gross_profit:
-        result_df = result_df[result_df['Data_Type'].str.contains('Gross Profit', case=False, na=False)]
-    
     # Generate response
     if result_df.empty:
-        return f"No data found for '{matched_value or question}' with Item Code {item_code}."
+        return f"No data found for '{ft_match or dt_match or question}' with Item Code {item_code}."
     
     total_value = result_df['Value'].sum()
     
