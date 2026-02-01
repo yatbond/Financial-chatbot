@@ -585,8 +585,10 @@ def handle_monthly_category(df, project, question):
         'contingency': 'Contingency',
     }
 
-    # Format response - no total, just individual values
+    # Get display name for the category
     display_name = category_display_names.get(category_name, category_name.title())
+
+    # Format response - no total, just individual values
     response = f"## Monthly {display_name} ({target_month}/{st.session_state.current_year}) ('000)\n\n"
 
     for ft, value in results.items():
