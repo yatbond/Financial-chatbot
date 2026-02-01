@@ -471,8 +471,9 @@ def handle_monthly_category(df, project, question):
     category_prefix = None
     category_name = None
 
-    # Check each category keyword
-    for kw, prefix in category_keywords.items():
+    # Check each category keyword - longer phrases first to avoid partial matches
+    sorted_keywords = sorted(category_keywords.items(), key=lambda x: len(x[0]), reverse=True)
+    for kw, prefix in sorted_keywords:
         if kw in question_lower:
             category_prefix = prefix
             category_name = kw
