@@ -517,9 +517,17 @@ def handle_monthly_category(df, project, question):
                 target_month = i + 1
                 break
 
-    # If no month specified, find latest month in the data
+    # If no month specified, find the latest month that has data for this category
     if target_month is None:
-        target_month = project_df['Month'].max()
+        # Find latest month with data for this category (across all financial types)
+        all_category_data = project_df[
+            (project_df['Sheet_Name'] != 'Financial Status') &
+            (project_df['Item_Code'].astype(str).str.startswith(category_prefix + '.'))
+        ]
+        if not all_category_data.empty:
+            target_month = all_category_data['Month'].max()
+        else:
+            target_month = project_df['Month'].max()
 
     # Financial types to check (excluding Financial Status which has all months)
     financial_types = ['Projection', 'Committed Cost', 'Accrual', 'Cash Flow']
@@ -549,7 +557,7 @@ def handle_monthly_category(df, project, question):
         # Always include all financial types (even if 0)
         results[ft] = total
 
-    # Check if all values are 0
+    st.write(f"DEBUG: Using target_month={target_month} for category_prefix={category_prefix}")
     st.write(f"DEBUG: results={results}, all_zero={all(v == 0 for v in results.values())}")
     if all(v == 0 for v in results.values()):
         return None
