@@ -477,17 +477,22 @@ def handle_monthly_category(df, project, question):
 
     # First expand acronyms in the question
     question_expanded = expand_acronyms(question_lower)
+    print(f"DEBUG: question='{question}', question_lower='{question_lower}', question_expanded='{question_expanded}'")
 
     # Check each category keyword - longer phrases first to avoid partial matches
     sorted_keywords = sorted(category_keywords.items(), key=lambda x: len(x[0]), reverse=True)
+    print(f"DEBUG: sorted_keywords={[(k, v) for k, v in sorted_keywords]}")
 
     for kw, prefix in sorted_keywords:
         # Check if keyword is in the expanded question
         # Use word boundary to avoid substring matches (e.g., "plant" in "materials")
         pattern = r'\b' + re.escape(kw) + r'\b'
-        if re.search(pattern, question_expanded):
+        match = re.search(pattern, question_expanded)
+        print(f"DEBUG: checking kw='{kw}', prefix='{prefix}', pattern='{pattern}', match={match}")
+        if match:
             category_prefix = prefix
             category_name = kw
+            print(f"DEBUG: MATCHED! category_prefix={category_prefix}, category_name={category_name}")
             break
 
     if not is_monthly_query or not category_prefix:
