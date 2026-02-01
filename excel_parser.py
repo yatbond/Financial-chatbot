@@ -7,7 +7,7 @@ Structure:
 - Other sheets: Sheet name = Financial Type, Column headings = Time periods
 
 Output: Flat table with columns:
-Year | Month | Sheet_Name | Financial_Type | Item_Code | Trade | Value
+Year | Month | Sheet_Name | Financial_Type | Item_Code | Data_Type | Value
 """
 
 import pandas as pd
@@ -15,6 +15,7 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 import json
+import re
 from io import BytesIO
 
 # Month name to number mapping
@@ -33,6 +34,26 @@ MONTH_MAP = {
     'december': 12, 'dec': 12
 }
 
+# Patterns to ignore in financial type headers (formula indicators)
+FORMULA_INDICATOR_PATTERNS = [
+    r'^[A-Z]$',                          # Single letter: A, B, C
+    r'^[A-Z]=[A-Z][+-]',                 # Formula like: D=B+C
+    r'^E\d*=[A-Z]/[A-Z]',               # Ratio like: E1=E/D
+    r'^ Balance .*',                     # Balance formulas
+    r'^% of time.*',                     # Percentage formulas
+]
+
+
+def is_formula_indicator(text):
+    """Check if text is a formula indicator that should be ignored."""
+    if not text:
+        return False
+    text = str(text).strip()
+    for pattern in FORMULA_INDICATOR_PATTERNS:
+        if re.match(pattern, text):
+            return True
+    return False
+
 
 def parse_date_to_year_month(date_val):
     """Extract Year and Month from various date formats."""
@@ -40,7 +61,6 @@ def parse_date_to_year_month(date_val):
         return None, None
     
     try:
-        # Handle string dates like "2025-12-31"
         if isinstance(date_val, str):
             dt = pd.to_datetime(date_val)
         else:
@@ -61,7 +81,7 @@ def get_merged_header_value(df, row_idx, col_idx):
 def parse_financial_status_sheet(xl, year=None, month=None):
     """
     Parse Financial Status sheet.
-    Returns list of tuples: (year, month, "Financial Status", financial_type, item_code, trade, value)
+    Returns list of tuples: (year, month, "Financial Status", financial_type, item_code, data_type, value)
     """
     df = pd.read_excel(xl, sheet_name='Financial Status', header=None)
     rows = []
@@ -77,9 +97,6 @@ def parse_financial_status_sheet(xl, year=None, month=None):
     
     # Build financial type mapping from merged headers (rows 11-14)
     # Headers span multiple rows - need to trace vertically
-    # Row 11: main category (e.g., "Budget", "Business Plan")
-    # Row 12: sub-category (e.g., "Tender", "1st Working Budget")
-    # Row 14: code (e.g., "A", "B", "D=B+C")
     financial_types = {}
     
     for col_idx in range(2, df.shape[1]):
@@ -91,32 +108,21 @@ def parse_financial_status_sheet(xl, year=None, month=None):
             if row_idx < len(df) and col_idx < df.shape[1]:
                 val = df.iloc[row_idx, col_idx]
                 if pd.notna(val) and str(val).strip():
-                    header_parts.append(str(val).strip())
+                    val_str = str(val).strip()
+                    # Skip formula indicators
+                    if not is_formula_indicator(val_str):
+                        header_parts.append(val_str)
         
         # Combine parts to create the full financial type
         if header_parts:
-            # Filter out generic terms like "Budget" that are just category labels
-            filtered_parts = []
-            for part in header_parts:
-                # Skip very short or generic headers that are just category labels
-                if part.lower() not in ['budget', 'nan', '']:
-                    filtered_parts.append(part)
-            
-            # If filtered_parts is empty, use original
-            if not filtered_parts:
-                combined = ' '.join(header_parts)
-            else:
-                combined = ' '.join(filtered_parts)
-            
+            combined = ' '.join(header_parts)
             if combined:
                 financial_types[col_idx] = combined
-    
-    print(f"DEBUG: Found {len(financial_types)} financial types: {list(financial_types.values())[:5]}")
     
     # Parse data rows (starting from row 15)
     for row_idx in range(15, len(df)):
         item_code = get_merged_header_value(df, row_idx, 0)  # Column A
-        trade = get_merged_header_value(df, row_idx, 1)  # Column B
+        data_type = get_merged_header_value(df, row_idx, 1)  # Column B (was Trade, now Data_Type)
         
         # Skip empty rows or header rows
         if not item_code or item_code in ['Item', '(HK$']:
@@ -130,7 +136,7 @@ def parse_financial_status_sheet(xl, year=None, month=None):
                     numeric_val = float(val) if pd.notna(val) else 0
                     # Only include non-zero values or structure rows
                     if numeric_val != 0 or '.' not in str(item_code):
-                        rows.append((year, month, "Financial Status", fin_type, item_code, trade, numeric_val))
+                        rows.append((year, month, "Financial Status", fin_type, item_code, data_type, numeric_val))
                 except (ValueError, TypeError):
                     pass
     
@@ -160,7 +166,7 @@ def parse_other_sheet(xl, sheet_name, base_year=None):
     Parse other sheets (Projection, Committed Cost, etc.)
     Sheet name = Financial Type
     Column headings = Time periods
-    Returns list of tuples: (year, month, sheet_name, financial_type, item_code, trade, value)
+    Returns list of tuples: (year, month, sheet_name, financial_type, item_code, data_type, value)
     """
     df = pd.read_excel(xl, sheet_name=sheet_name, header=None)
     rows = []
@@ -191,7 +197,7 @@ def parse_other_sheet(xl, sheet_name, base_year=None):
     # Parse data rows (starting from row 12)
     for row_idx in range(12, len(df)):
         item_code = get_merged_header_value(df, row_idx, 0)  # Column A
-        trade = get_merged_header_value(df, row_idx, 1)  # Column B
+        data_type = get_merged_header_value(df, row_idx, 1)  # Column B (was Trade, now Data_Type)
         
         # Skip empty rows or header rows
         if not item_code or item_code in ['Item', '(HK$']:
@@ -205,7 +211,7 @@ def parse_other_sheet(xl, sheet_name, base_year=None):
                     numeric_val = float(val) if pd.notna(val) else 0
                     # Only include non-zero values or structure rows
                     if numeric_val != 0 or '.' not in str(item_code):
-                        rows.append((col_year, col_month, sheet_name, sheet_name, item_code, trade, numeric_val))
+                        rows.append((col_year, col_month, sheet_name, sheet_name, item_code, data_type, numeric_val))
                 except (ValueError, TypeError):
                     pass
     
@@ -215,7 +221,7 @@ def parse_other_sheet(xl, sheet_name, base_year=None):
 def parse_workbook(file_path):
     """
     Parse a complete Excel workbook and return flat data.
-    Returns DataFrame with columns: Year, Month, Sheet_Name, Financial_Type, Item_Code, Trade, Value
+    Returns DataFrame with columns: Year, Month, Sheet_Name, Financial_Type, Item_Code, Data_Type, Value
     """
     all_rows = []
     
@@ -236,10 +242,10 @@ def parse_workbook(file_path):
     
     # Create DataFrame
     if all_rows:
-        df = pd.DataFrame(all_rows, columns=['Year', 'Month', 'Sheet_Name', 'Financial_Type', 'Item_Code', 'Trade', 'Value'])
+        df = pd.DataFrame(all_rows, columns=['Year', 'Month', 'Sheet_Name', 'Financial_Type', 'Item_Code', 'Data_Type', 'Value'])
         return df
     else:
-        return pd.DataFrame(columns=['Year', 'Month', 'Sheet_Name', 'Financial_Type', 'Item_Code', 'Trade', 'Value'])
+        return pd.DataFrame(columns=['Year', 'Month', 'Sheet_Name', 'Financial_Type', 'Item_Code', 'Data_Type', 'Value'])
 
 
 def parse_and_save(file_path, output_path=None):
@@ -266,6 +272,7 @@ if __name__ == "__main__":
     
     df = parse_workbook(file_path)
     print(f"\nTotal rows: {len(df)}")
+    print(f"\nColumns: {list(df.columns)}")
     print(f"\nSample data:")
     print(df.head(20).to_string())
     print(f"\nUnique Financial Types:")
