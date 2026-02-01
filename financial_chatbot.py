@@ -375,62 +375,9 @@ def answer_question(df, project, question):
     if 'after adjustment' in question_lower or 'adjusted' in question_lower:
         item_code = '5'  # After adjustment
     
-    # Check for Gross Profit
-    is_gross_profit = 'gross profit' in question_lower or 'gp' in question_lower
-    
-    # Define Financial_Type search terms
-    ft_search_terms = {
-        'projection': 'projection',
-        'budget': 'budget',
-        'tender': 'tender',
-        'audit': 'audit',
-        'business plan': 'business plan',
-        'committed': 'committed',
-        'accrual': 'accrual',
-        'cash flow': 'cash flow',
-        'revision': 'revision',
-        'adjustment': 'adjustment',
-    }
-    
-    # Define Data_Type search terms
-    dt_search_terms = {
-        'net profit': 'net profit',
-        'gross profit': 'gross profit',
-        'income': 'income',
-        'revenue': 'revenue',
-        'cost': 'cost',
-        'claim': 'claim',
-        'variation': 'variation',
-        'fluctuation': 'fluctuation',
-    }
-    
-    # Find Financial_Type match
-    ft_match = None
-    for search_term, ft_keyword in ft_search_terms.items():
-        if search_term in question_lower:
-            # Find matching Financial_Type
-            for ft in project_df['Financial_Type'].dropna().unique():
-                if ft_keyword in ft.lower():
-                    ft_match = ft
-                    break
-            if ft_match:
-                break
-    
-    # Find Data_Type match
-    dt_match = None
-    for search_term, dt_keyword in dt_search_terms.items():
-        if search_term in question_lower:
-            # Find matching Data_Type
-            for dt in project_df['Data_Type'].dropna().unique():
-                if dt_keyword in dt.lower():
-                    dt_match = dt
-                    break
-            if dt_match:
-                break
-    
-    # If no specific terms found, use general fuzzy matching
-    if ft_match is None and dt_match is None:
-        ft_match, dt_match = find_best_match(df, question)
+    # Use fuzzy search to find BOTH Financial_Type and Data_Type matches
+    ft_match = find_best_match_in_column(project_df, question, 'Financial_Type')
+    dt_match = find_best_match_in_column(project_df, question, 'Data_Type')
     
     # Build filter
     filters = {
@@ -471,6 +418,45 @@ def answer_question(df, project, question):
     response += f"\n*Records found: {len(result_df)}*"
     
     return response
+
+
+def find_best_match_in_column(df, search_text, column_name):
+    """
+    Find the best matching value in a specific column using fuzzy search.
+    Returns the best matching value or None.
+    """
+    search_lower = search_text.lower()
+    unique_values = df[column_name].dropna().unique().tolist()
+    
+    best_match = None
+    best_score = 0
+    
+    for value in unique_values:
+        value_lower = str(value).lower()
+        score = 0
+        
+        # Direct substring match
+        if search_lower in value_lower:
+            score += 10
+        
+        # Word-by-word matching
+        search_words = set(search_lower.split())
+        value_words = set(value_lower.split())
+        score += len(search_words & value_words) * 5
+        
+        # Exact word match bonus
+        for word in search_words:
+            if word in value_words and len(word) > 2:
+                score += 3
+        
+        if score > best_score:
+            best_score = score
+            best_match = value
+    
+    # Only return if score is meaningful (> 0)
+    if best_match and best_score > 0:
+        return best_match
+    return None
 
 
 # Load credentials
