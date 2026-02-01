@@ -483,7 +483,9 @@ def handle_monthly_category(df, project, question):
 
     for kw, prefix in sorted_keywords:
         # Check if keyword is in the expanded question
-        if kw in question_expanded:
+        # Use word boundary to avoid substring matches (e.g., "plant" in "materials")
+        pattern = r'\b' + re.escape(kw) + r'\b'
+        if re.search(pattern, question_expanded):
             category_prefix = prefix
             category_name = kw
             break
