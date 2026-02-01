@@ -136,8 +136,8 @@ def get_project_metrics(df, project):
     else:
         latest_month = None
     
-    # Filter by Item_Code = 3 and Data_Type contains "Gross Profit"
-    gp_filter = (project_df['Item_Code'] == 3) & \
+    # Filter by Item_Code = '3' (string) and Data_Type contains "Gross Profit"
+    gp_filter = (project_df['Item_Code'] == '3') & \
                 (project_df['Data_Type'].str.contains('Gross Profit', case=False, na=False))
     
     # Business Plan GP: Sheet_Name = Financial Status, Financial_Type contains "Business Plan"
@@ -161,9 +161,9 @@ def get_project_metrics(df, project):
     if not wip.empty:
         metrics['WIP GP'] = wip['Value'].sum()
     
-    # Cash Flow: Sheet_Name = Financial Status, Financial_Type = "Cash Flow"
+    # Cash Flow: Sheet_Name = Financial Status, Financial_Type contains "Cash Flow"
     cf = project_df[(project_df['Sheet_Name'] == 'Financial Status') & 
-                    (project_df['Financial_Type'] == 'Cash Flow') &
+                    (project_df['Financial_Type'].str.contains('Cash Flow', case=False, na=False)) &
                     gp_filter]
     if not cf.empty:
         metrics['Cash Flow'] = cf['Value'].sum()
