@@ -5,7 +5,6 @@ Accesses Google Drive via API for financial data
 import streamlit as st
 import pandas as pd
 import json
-import os
 
 st.set_page_config(page_title="Financial Chatbot", page_icon="📊")
 
@@ -16,36 +15,103 @@ if 'df' not in st.session_state:
     st.session_state.df = None
 if 'creds' not in st.session_state:
     st.session_state.creds = None
+if 'service' not in st.session_state:
+    st.session_state.service = None
 
-def load_data_from_gdrive():
-    """Load data using Google Drive API."""
+def get_drive_service():
+    """Get Google Drive service."""
+    if st.session_state.service is not None:
+        return st.session_state.service
+    
+    if st.session_state.creds is None:
+        return None
+    
     try:
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
-        from io import BytesIO
-        
-        if st.session_state.creds is None:
-            return None, "Google credentials not found in secrets"
         
         credentials = service_account.Credentials.from_service_account_info(
             st.session_state.creds, 
             scopes=['https://www.googleapis.com/auth/drive.readonly']
         )
+        st.session_state.service = build('drive', 'v3', credentials=credentials)
+        return st.session_state.service
+    except:
+        return None
+
+def find_folder_id(folder_name):
+    """Find folder ID by name."""
+    service = get_drive_service()
+    if service is None:
+        return None
+    
+    results = service.files().list(
+        q=f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+        fields="files(id, name)"
+    ).execute()
+    
+    folders = results.get('files', [])
+    if folders:
+        return folders[0]['id']
+    return None
+
+def find_excel_files_in_folder(folder_id):
+    """Find Excel files in a folder."""
+    service = get_drive_service()
+    if service is None:
+        return []
+    
+    results = service.files().list(
+        q=f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+        fields="files(id, name)"
+    ).execute()
+    
+    return results.get('files', [])
+
+def load_data_from_gdrive():
+    """Load data using Google Drive API."""
+    try:
+        from io import BytesIO
         
-        service = build('drive', 'v3', credentials=credentials)
+        service = get_drive_service()
+        if service is None:
+            return None, "Could not connect to Google Drive"
         
-        # Find Excel files with "Financial Report" in name
-        results = service.files().list(
-            q="name contains 'Financial Report' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
-            fields="files(id, name)"
-        ).execute()
+        # Find the Knowledge Base folder
+        folder_id = find_folder_id("Ai Chatbot Knowledge Base")
+        if folder_id is None:
+            return None, "Folder 'Ai Chatbot Knowledge Base' not found"
         
-        files = results.get('files', [])
-        if not files:
-            return None, "No Excel files found in Google Drive"
+        st.session_state.folder_id = folder_id
         
+        # Find Excel files in the folder
+        # Search in folder and subfolders
+        all_files = []
+        
+        def list_files_in_folder(parent_id, path=""):
+            results = service.files().list(
+                q=f"'{parent_id}' in parents and trashed=false",
+                fields="files(id, name, mimeType)"
+            ).execute()
+            
+            for f in results.get('files', []):
+                if f['mimeType'] == 'application/vnd.google-apps.spreadsheet':
+                    all_files.append({'id': f['id'], 'name': f['name']})
+                elif f['mimeType'] == 'application/vnd.google-apps.folder':
+                    list_files_in_folder(f['id'], f"{path}/{f['name']}")
+        
+        list_files_in_folder(folder_id)
+        
+        if not all_files:
+            return None, f"No Excel files found in 'Ai Chatbot Knowledge Base' folder"
+        
+        st.write(f"Found {len(all_files)} Excel files")
+        
+        # Load first 3 files for testing
         all_dfs = []
-        for f in files[:3]:  # Limit to first 3 for testing
+        for f in all_files[:3]:
+            st.write(f"Loading: {f['name']}")
+            
             # Export as Excel
             request = service.files().export_media(
                 fileId=f['id'],
@@ -62,13 +128,14 @@ def load_data_from_gdrive():
                     sheet_df['_source_sheet'] = sheet_name
                     all_dfs.append(sheet_df)
             except Exception as e:
+                st.write(f"Error parsing {f['name']}: {e}")
                 continue
         
         if all_dfs:
             combined = pd.concat(all_dfs, ignore_index=True)
             return combined, "Success"
         
-        return None, "No data parsed"
+        return None, "No data could be parsed"
         
     except Exception as e:
         import traceback
@@ -84,7 +151,7 @@ if st.session_state.creds is None:
             else:
                 st.session_state.creds = creds
     except Exception as e:
-        pass
+        st.write(f"Error loading credentials: {e}")
 
 st.title("📊 Financial Chatbot")
 
@@ -92,14 +159,16 @@ st.title("📊 Financial Chatbot")
 if st.session_state.creds is None:
     st.warning("Google credentials not found in Streamlit secrets!")
     st.info("Please add 'google_credentials' to your Streamlit Cloud secrets.")
+elif get_drive_service() is None:
+    st.warning("Could not connect to Google Drive")
 else:
-    st.success("Google credentials loaded")
+    st.success("Connected to Google Drive ✓")
 
 # Load data button
 if not st.session_state.data_loaded:
     st.info("Click below to load financial data from Google Drive")
     if st.button("Load Data from Google Drive"):
-        with st.spinner("Loading data..."):
+        with st.spinner("Searching for files..."):
             df, msg = load_data_from_gdrive()
             if df is not None and len(df) > 0:
                 st.session_state.df = df
