@@ -23,10 +23,18 @@ def load_credentials():
     # Check Streamlit secrets (for Streamlit Cloud)
     try:
         import streamlit as st
-        if 'GOOGLE_SERVICE_ACCOUNT' in st.secrets:
-            SERVICE_ACCOUNT_INFO = json.loads(st.secrets['GOOGLE_SERVICE_ACCOUNT'])
-            return True
-    except:
+        # Try different secret key names
+        for key in ['GOOGLE_SERVICE_ACCOUNT', 'google_credentials', 'GOOGLE_CREDENTIALS']:
+            if key in st.secrets:
+                creds = st.secrets[key]
+                # Parse if it's a string
+                if isinstance(creds, str):
+                    SERVICE_ACCOUNT_INFO = json.loads(creds)
+                else:
+                    SERVICE_ACCOUNT_INFO = creds
+                return True
+    except Exception as e:
+        print(f"Error loading from Streamlit secrets: {e}")
         pass
     
     # Check environment variable
