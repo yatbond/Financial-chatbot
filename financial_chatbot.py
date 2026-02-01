@@ -107,12 +107,7 @@ def extract_project_info(filename):
 
 def load_folder_structure(service):
     """Load folder structure and list projects (fast - no data loading)."""
-    print("=== FUNCTION load_folder_structure called ===")
     folders = list_folders(service)
-    print(f"Root folders: {[f['name'] for f in folders]}")
-
-    # Debug: Show all root folders on main page
-    st.write(f"**Debug: Root folders found: {[f['name'] for f in folders]}**")
 
     # Find root folder
     root_folder = None
@@ -121,12 +116,7 @@ def load_folder_structure(service):
             root_folder = f['id']
             break
 
-    print(f"Root folder found: {root_folder}")
-    st.write(f"**Debug: Root folder ID: {root_folder}**")
-
     if not root_folder:
-        st.error("Root folder 'Ai Chatbot Knowledge Base' not found!")
-        st.write("Your folder might have a different name. Check the debug output above.")
         return {}, {}
     
     # Find year folders
@@ -159,7 +149,6 @@ def load_folder_structure(service):
                         break
 
                 if all_csv_files:
-                    st.write(f"**Found {len(all_csv_files)} files in {year}/{m['name']}**")
                     if year not in folders_with_data:
                         folders_with_data[year] = []
                     folders_with_data[year].append(m['name'])
@@ -169,11 +158,9 @@ def load_folder_structure(service):
                         code, name = extract_project_info(csv_file['name'])
                         if code:
                             project_list[csv_file['name']] = {'code': code, 'name': name, 'year': year, 'month': m['name']}
-        except Exception as e:
-            st.error(f"Error processing {year}: {e}")
+        except:
             continue
 
-    st.write(f"**Debug: Total projects found: {len(project_list)}**")
     return folders_with_data, project_list
 
 def load_project_data(service, filename, year, month):
@@ -425,29 +412,20 @@ service = get_drive_service()
 
 st.title("📊 Financial Chatbot")
 
-print("=== START OF APP ===")
-print(f"service is None: {service is None}")
-
 if service is None:
     st.error("Could not connect to Google Drive")
     st.info("Check Streamlit secrets for 'google_credentials'")
 else:
     st.success("Connected to Google Drive ✓")
-    print("=== About to load folder structure ===")
 
 # Load folder structure (fast - no data)
 if not st.session_state.available_years:
-    print("=== Loading folder structure ===")
     with st.spinner("Loading folder structure..."):
         folders_with_data, project_list = load_folder_structure(service)
         st.session_state.folders_with_data = folders_with_data
         st.session_state.project_list = project_list
         st.session_state.available_years = sorted(folders_with_data.keys(), reverse=True)
         st.session_state.available_months = sorted(set(m for months in folders_with_data.values() for m in months))
-
-        # Show debug info on main page
-        st.write(f"**Debug: Folders with data: {folders_with_data}**")
-        st.write(f"**Debug: Total projects found: {len(project_list)}**")
 
 # Year and Month selectors
 if st.session_state.available_years:
@@ -477,12 +455,7 @@ if st.session_state.available_years:
     
     st.session_state.current_year = selected_year
     st.session_state.current_month = selected_month
-    
-    # Debug: Show all loaded projects
-    with st.expander(f"Debug: All loaded projects ({len(st.session_state.project_list)})", expanded=False):
-        for f, info in st.session_state.project_list.items():
-            st.write(f"{info['year']}/{info['month']}: {info['code']} - {info['name']}")
-    
+
     # Show projects in this period (fast - just file names)
     projects_in_period = {}
     for filename, info in st.session_state.project_list.items():
@@ -491,11 +464,6 @@ if st.session_state.available_years:
     
     st.markdown(f"### 🏗️ Projects in {selected_month}/{selected_year}")
     st.caption(f"Found {len(projects_in_period)} projects")
-    
-    # Debug: Show all projects in project_list
-    with st.expander(f"Debug: All projects in period ({len(projects_in_period)})", expanded=False):
-        for f, info in projects_in_period.items():
-            st.write(f"{info['code']} - {info['name']}: {f}")
     
     if projects_in_period:
         
