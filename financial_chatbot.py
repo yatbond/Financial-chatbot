@@ -270,8 +270,8 @@ def load_project_data(service, filename, year, month):
         content = request.execute()
         df = pd.read_csv(StringIO(content.decode('utf-8')))
 
-        # Add 1-based roll number (row number from CSV)
-        df['Roll'] = range(1, len(df) + 1)
+        # Add 1-based roll number (accounting for header row + data rows)
+        df['Roll'] = range(2, len(df) + 2)
 
         code, name = extract_project_info(filename)
         if code:
