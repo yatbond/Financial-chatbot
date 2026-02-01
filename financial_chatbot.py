@@ -256,31 +256,32 @@ def find_best_matches(df, search_text, project):
     search_lower = search_text.lower()
     search_words = search_lower.split()
     
-    # Determine Item_Code based on query
-    item_code = '3'
+    # Determine target Item_Code based on query
+    target_item_code = None
     if 'net profit' in search_lower or 'net loss' in search_lower:
-        item_code = '7'
+        target_item_code = '7'
     elif 'after adjustment' in search_lower or 'adjusted' in search_lower:
-        item_code = '5'
+        target_item_code = '5'
     
-    # Filter by Item_Code first
-    filtered_df = project_df[project_df['Item_Code'] == item_code]
-    
-    # Get unique combinations
-    combinations = filtered_df.groupby(['Financial_Type', 'Data_Type']).agg({
+    # Get all unique combinations (across ALL Item_Codes)
+    # We'll search first, then group
+    all_combinations = project_df.groupby(['Financial_Type', 'Data_Type', 'Item_Code']).agg({
         'Value': 'sum',
         'Month': 'first'
     }).reset_index()
     
     matches = []
     
-    for _, row in combinations.iterrows():
+    for _, row in all_combinations.iterrows():
         ft = str(row['Financial_Type']).lower()
         dt = str(row['Data_Type']).lower()
         value = row['Value']
         month = row['Month']
+        item_code = row['Item_Code']
         
         score = 0
+        matched_count = 0
+        total_query_words = len([w for w in search_words if len(w) >= 2])
         
         for word in search_words:
             if len(word) < 2:
@@ -289,31 +290,24 @@ def find_best_matches(df, search_text, project):
             # Check Financial_Type
             if word in ft:
                 score += 10
+                matched_count += 1
             
             # Check Data_Type
             if word in dt:
                 score += 10
-            
-            # Special bonuses for specific term matches
-            # "projected" -> "projection" in Financial_Type
-            if word == 'projected' and 'projection' in ft:
-                score += 30
-            
-            # "budget" in Financial_Type
-            if word == 'budget' and 'budget' in ft:
-                score += 30
-            
-            # "audit" in Financial_Type
-            if word == 'audit' and 'audit' in ft:
-                score += 30
-            
-            # "business" in Financial_Type
-            if word == 'business' and 'business' in ft:
-                score += 30
-            
-            # "cash" in Financial_Type
-            if word == 'cash' and 'cash' in ft:
-                score += 30
+                matched_count += 1
+        
+        # Special bonuses for specific term matches
+        if 'projected' in search_words and 'projection' in ft:
+            score += 30
+        if 'budget' in search_words and 'budget' in ft:
+            score += 30
+        if 'audit' in search_words and 'audit' in ft:
+            score += 30
+        if 'business' in search_words and 'business' in ft:
+            score += 30
+        if 'cash' in search_words and 'cash' in ft:
+            score += 30
         
         # Additional bonuses for key terms
         if 'projection' in search_lower and 'projection' in ft:
@@ -333,8 +327,21 @@ def find_best_matches(df, search_text, project):
             score += 20
         if 'income' in search_lower and 'income' in dt:
             score += 20
-        if 'cost' in search_lower and 'cost' in dt:
-            score += 20
+        
+        # If target Item_Code specified, prioritize it
+        if target_item_code and item_code == target_item_code:
+            score += 5
+        
+        # If ALL query words are found somewhere, give bonus
+        if total_query_words > 0:
+            words_found = 0
+            for word in search_words:
+                if len(word) < 2:
+                    continue
+                if word in ft or word in dt:
+                    words_found += 1
+            if words_found == total_query_words:
+                score += 30  # Bonus for finding all words
         
         if score > 0:
             matches.append({
@@ -343,11 +350,12 @@ def find_best_matches(df, search_text, project):
                 'Value': value,
                 'Month': month,
                 'Item_Code': item_code,
-                'score': score
+                'score': score,
+                'matched_count': matched_count
             })
     
-    # Sort by score descending
-    matches.sort(key=lambda x: x['score'], reverse=True)
+    # Sort by score descending, then by matched_count
+    matches.sort(key=lambda x: (x['score'], x['matched_count']), reverse=True)
     
     return matches
 
