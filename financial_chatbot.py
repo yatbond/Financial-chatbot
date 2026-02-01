@@ -23,6 +23,8 @@ ACRONYMS = {
     'staff': 'manpower (mgt. & supervision)',
     'labour': 'manpower (labour)',
     'labor': 'manpower (labour)',
+    'cashflow': 'cash flow',
+    'cash': 'cash flow',
 }
 
 def expand_acronyms(text):
@@ -609,7 +611,7 @@ if st.session_state.data_loaded and st.session_state.df is not None:
     
     # Chatbot
     st.markdown("### 💬 Ask about this Project ('000)")
-    st.caption("💡 Shortcuts: GP=Gross Profit, NP=Net Profit, Subcon=Subcontractor, Rebar=Reinforcement")
+    st.caption("💡 Shortcuts: GP=Gross Profit, NP=Net Profit, Subcon=Subcontractor, Rebar=Reinforcement, Cashflow=Cash Flow")
 
     with st.form("chat_form"):
         user_question = st.text_input("Your question:", placeholder="e.g., What is the NP? or What is the Projected GP?")
