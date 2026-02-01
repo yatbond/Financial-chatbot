@@ -141,7 +141,7 @@ def get_project_metrics(df, project):
     if not proj.empty:
         if latest_month:
             proj = proj[proj['Month'] == latest_month]
-        gp = proj[proj['Trade'].str.contains('Gross Profit', case=False, na=False)]
+        gp = proj[proj['Data_Type'].str.contains('Gross Profit', case=False, na=False)]
         if not gp.empty:
             metrics['Projected GP'] = gp['Value'].sum()
     
@@ -149,14 +149,14 @@ def get_project_metrics(df, project):
     wip = project_df[(project_df['Sheet_Name'] == 'Financial Status') & 
                      (project_df['Financial_Type'] == 'Audit Report (WIP) J')]
     if not wip.empty:
-        gp = wip[wip['Trade'].str.contains('Gross Profit', case=False, na=False)]
+        gp = wip[wip['Data_Type'].str.contains('Gross Profit', case=False, na=False)]
         if not gp.empty:
             metrics['WIP GP'] = gp['Value'].sum()
     
     # Cash Flow: Cash Flow sheet
     cf = project_df[project_df['Sheet_Name'] == 'Cash Flow']
     if not cf.empty:
-        gp = cf[cf['Trade'].str.contains('Gross Profit', case=False, na=False)]
+        gp = cf[cf['Data_Type'].str.contains('Gross Profit', case=False, na=False)]
         if not gp.empty:
             metrics['Cash Flow'] = gp['Value'].sum()
     
