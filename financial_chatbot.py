@@ -512,20 +512,20 @@ def handle_monthly_category(df, project, question):
 
     # If no month specified, use the currently selected report month
     if target_month is None:
-        # Use the selected month from the report
-        target_month = st.session_state.current_month
+        # Find the latest month with data for this category
+        category_data = project_df[
+            project_df['Item_Code'].astype(str).str.startswith(category_prefix + '.')
+        ]
+        if not category_data.empty:
+            target_month = category_data['Month'].max()
+        else:
+            target_month = st.session_state.current_month
 
     # Financial types to check (excluding Financial Status which has all months)
     financial_types = ['Projection', 'Committed Cost', 'Accrual', 'Cash Flow']
 
-    # Show unique sheet names and financial types for debugging
-    st.write(f"DEBUG: unique Sheet_Names in project_df: {project_df['Sheet_Name'].unique().tolist()}")
-    st.write(f"DEBUG: unique Financial_Types in project_df: {project_df['Financial_Type'].unique().tolist()}")
-    st.write(f"DEBUG: months in project_df: {sorted(project_df['Month'].unique().tolist())}")
-
     # Find what Item_Codes start with the category prefix
     matching_codes = project_df[project_df['Item_Code'].astype(str).str.startswith(category_prefix + '.')]['Item_Code'].unique().tolist()
-    st.write(f"DEBUG: Item_Codes starting with {category_prefix}.: {matching_codes[:10]}")
 
     # Check if Financial_Status sheet has the data we need
     financial_status_data = project_df[
@@ -533,7 +533,6 @@ def handle_monthly_category(df, project, question):
         (project_df['Month'] == target_month) &
         (project_df['Item_Code'].astype(str).str.startswith(category_prefix + '.'))
     ]
-    st.write(f"DEBUG: Financial Status data for month {target_month}, category {category_prefix}: {len(financial_status_data)} rows")
 
     results = {}
     for ft in financial_types:
@@ -561,9 +560,6 @@ def handle_monthly_category(df, project, question):
                 matched_count += 1
 
         results[ft] = total
-        st.write(f"DEBUG: ft='{ft}', total={total}, matched_count={matched_count}, filtered_len={len(filtered)}")
-
-    st.write(f"DEBUG: target_month={target_month}, category_prefix={category_prefix}")
 
     # Map category keywords to display names
     category_display_names = {
