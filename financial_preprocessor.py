@@ -176,6 +176,9 @@ if __name__ == "__main__":
     
     if len(sys.argv) > 1:
         root = sys.argv[1]
+        # Remove quotes if present
+        if root.startswith('"') and root.endswith('"'):
+            root = root[1:-1]
     elif os.path.exists('G:/My Drive'):
         # Use G: drive if available (local machine with Google Drive)
         root = 'G:/My Drive/Ai Chatbot Knowledge Base'

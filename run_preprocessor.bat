@@ -30,7 +30,7 @@ echo Running preprocessor...
 echo.
 
 REM Run the preprocessor
-python financial_preprocessor.py %DATA_SOURCE%
+python financial_preprocessor.py "%DATA_SOURCE%"
 
 echo.
 if %ERRORLEVEL% == 0 (
