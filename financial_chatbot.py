@@ -146,7 +146,7 @@ def load_folder_structure(service):
 
                 while True:
                     csv_result = service.files().list(
-                        query=f"'{m['id']}' in parents and name contains '_flat.csv' and trashed=false",
+                        q=f"'{m['id']}' in parents and name contains '_flat.csv' and trashed=false",
                         fields="files(name), nextPageToken",
                         pageSize=100,
                         pageToken=page_token
