@@ -375,6 +375,18 @@ def answer_question(df, project, question):
     if 'after adjustment' in question_lower or 'adjusted' in question_lower:
         item_code = '5'  # After adjustment
     
+    # Special handling for "Net Profit" - it exists in Item_Code='7', not '3'
+    if 'net profit' in question_lower or 'net loss' in question_lower:
+        # Check if Net Profit exists for Item_Code='3'
+        net_in_3 = project_df[(project_df['Item_Code'] == '3') & 
+                               (project_df['Data_Type'].str.contains('Net Profit', case=False, na=False))]
+        if net_in_3.empty:
+            # Net Profit not in Item_Code=3, try Item_Code=7
+            net_in_7 = project_df[(project_df['Item_Code'] == '7') & 
+                                   (project_df['Data_Type'].str.contains('Net Profit', case=False, na=False))]
+            if not net_in_7.empty:
+                item_code = '7'  # Use Item_Code=7 for Net Profit
+    
     # Use fuzzy search to find BOTH Financial_Type and Data_Type matches
     ft_match = find_best_match_in_column(project_df, question, 'Financial_Type')
     dt_match = find_best_match_in_column(project_df, question, 'Data_Type')
@@ -383,10 +395,8 @@ def answer_question(df, project, question):
     filters = {
         'Sheet_Name': 'Financial Status',
         'Month': target_month,
+        'Item_Code': item_code,
     }
-    
-    if item_code:
-        filters['Item_Code'] = item_code
     
     if ft_match:
         filters['Financial_Type'] = ft_match
