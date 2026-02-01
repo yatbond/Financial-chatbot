@@ -1,0 +1,160 @@
+{
+  "version": "1.0",
+  "root_folder": "C:/Users/derri/.openclaw/workspace/financial_data",
+  "sources": [
+    {
+      "excel": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1014 PolyU Financial Report 2025-12.xlsx",
+      "csv": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1014 PolyU Financial Report 2025-12_flat.csv",
+      "subfolder": "12",
+      "rows": 1307,
+      "year_range": "2025-2025",
+      "sheets": [
+        "Financial Status",
+        "Projection",
+        "Committed Cost",
+        "Accrual",
+        "Cash Flow"
+      ]
+    },
+    {
+      "excel": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1027 Contract No.DC202002 Financial Report 2025-12.xlsx",
+      "csv": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1027 Contract No.DC202002 Financial Report 2025-12_flat.csv",
+      "subfolder": "12",
+      "rows": 1511,
+      "year_range": "2025-2025",
+      "sheets": [
+        "Financial Status",
+        "Projection",
+        "Committed Cost",
+        "Accrual",
+        "Cash Flow"
+      ]
+    },
+    {
+      "excel": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1057 Contract No.18WSD21 Financial Report 2025-12.xlsx",
+      "csv": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1057 Contract No.18WSD21 Financial Report 2025-12_flat.csv",
+      "subfolder": "12",
+      "rows": 1530,
+      "year_range": "2025-2025",
+      "sheets": [
+        "Financial Status",
+        "Projection",
+        "Committed Cost",
+        "Accrual",
+        "Cash Flow"
+      ]
+    },
+    {
+      "excel": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1062 HY202121 Retrofitting of Noise Barrier on Po Lam Road North Financial Report 2025-12.xlsx",
+      "csv": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1062 HY202121 Retrofitting of Noise Barrier on Po Lam Road North Financial Report 2025-12_flat.csv",
+      "subfolder": "12",
+      "rows": 1120,
+      "year_range": "2025-2025",
+      "sheets": [
+        "Financial Status",
+        "Projection",
+        "Committed Cost",
+        "Accrual",
+        "Cash Flow"
+      ]
+    },
+    {
+      "excel": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1069 TST Financial Report 2025-12.xlsx",
+      "csv": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1069 TST Financial Report 2025-12_flat.csv",
+      "subfolder": "12",
+      "rows": 1599,
+      "year_range": "2025-2025",
+      "sheets": [
+        "Financial Status",
+        "Projection",
+        "Committed Cost",
+        "Accrual",
+        "Cash Flow"
+      ]
+    },
+    {
+      "excel": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1090 Cheung Sha Wan Financial Report 2025-12.xlsx",
+      "csv": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1090 Cheung Sha Wan Financial Report 2025-12_flat.csv",
+      "subfolder": "12",
+      "rows": 1611,
+      "year_range": "2025-2025",
+      "sheets": [
+        "Financial Status",
+        "Projection",
+        "Committed Cost",
+        "Accrual",
+        "Cash Flow"
+      ]
+    },
+    {
+      "excel": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1130 Sewage Rising Mains in Southern DistrictFinancial Report 2025-12.xlsx",
+      "csv": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\1130 Sewage Rising Mains in Southern DistrictFinancial Report 2025-12_flat.csv",
+      "subfolder": "12",
+      "rows": 1240,
+      "year_range": "2025-2025",
+      "sheets": [
+        "Financial Status",
+        "Projection",
+        "Committed Cost",
+        "Accrual",
+        "Cash Flow"
+      ]
+    },
+    {
+      "excel": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\951 SENTX Financial Report 2025-12.xlsx",
+      "csv": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\951 SENTX Financial Report 2025-12_flat.csv",
+      "subfolder": "12",
+      "rows": 947,
+      "year_range": "2025-2025",
+      "sheets": [
+        "Financial Status",
+        "Projection",
+        "Committed Cost",
+        "Accrual",
+        "Cash Flow"
+      ]
+    },
+    {
+      "excel": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\968 DC201809 Financial Report 2025-12.xlsx",
+      "csv": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\968 DC201809 Financial Report 2025-12_flat.csv",
+      "subfolder": "12",
+      "rows": 1167,
+      "year_range": "2025-2025",
+      "sheets": [
+        "Financial Status",
+        "Projection",
+        "Committed Cost",
+        "Accrual",
+        "Cash Flow"
+      ]
+    },
+    {
+      "excel": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\985 Disneyland-Completion Works Financial Report 2025-12.xlsx",
+      "csv": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\985 Disneyland-Completion Works Financial Report 2025-12_flat.csv",
+      "subfolder": "12",
+      "rows": 1080,
+      "year_range": "2025-2025",
+      "sheets": [
+        "Financial Status",
+        "Projection",
+        "Committed Cost",
+        "Accrual",
+        "Cash Flow"
+      ]
+    },
+    {
+      "excel": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\997 ND201902 Financial Report 2025-12.xlsx",
+      "csv": "C:/Users/derri/.openclaw/workspace/financial_data\\2025\\12\\997 ND201902 Financial Report 2025-12_flat.csv",
+      "subfolder": "12",
+      "rows": 1595,
+      "year_range": "2025-2025",
+      "sheets": [
+        "Financial Status",
+        "Projection",
+        "Committed Cost",
+        "Accrual",
+        "Cash Flow"
+      ]
+    }
+  ]
+}

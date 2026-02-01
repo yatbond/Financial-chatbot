@@ -1,0 +1,4 @@
+{
+  "buildCommand": "pip install streamlit pandas google-auth google-auth-oauthlib google-api-python-client openpyxl",
+  "installCommand": "pip install streamlit pandas google-auth google-auth-oauthlib google-api-python-client openpyxl"
+}
