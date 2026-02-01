@@ -31,7 +31,7 @@ ACRONYMS = {
     'plant': 'plant and machinery',
     'machinery': 'plant and machinery',
     'lab': 'labour',
-    'manpower': 'manpower (labour)',
+    'manpower': 'manpower (labour) for works',
 }
 
 def expand_acronyms(text):
@@ -456,8 +456,8 @@ def handle_monthly_category(df, project, question):
         'labor': '2.4',
         'lab': '2.4',
         'manpower (labour) for works': '2.5',
-        'manpower': '2.4',
-        'manpower (labour)': '2.4',
+        'manpower (labour)': '2.5',
+        'manpower': '2.5',
         'subcontractor': '2.5',
         'subcon': '2.5',
         'staff': '2.6',
@@ -548,6 +548,9 @@ def handle_monthly_category(df, project, question):
         'machinery': 'Plant & Machinery',
         'labour': 'Labour',
         'labor': 'Labour',
+        'manpower': 'Manpower (Labour)',
+        'manpower (labour)': 'Manpower (Labour)',
+        'manpower (labour) for works': 'Manpower (Labour) for Works',
         'subcon': 'Subcontractor',
         'subcontractor': 'Subcontractor',
         'staff': 'Staff',
