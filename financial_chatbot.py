@@ -1,10 +1,11 @@
 """
 Financial Chatbot - Streamlit Web App
-Reads preprocessed CSV files from Google Drive
+Reads preprocessed CSV files from Google Drive - NO PARSING NEEDED!
 """
 import streamlit as st
 import pandas as pd
 import json
+from io import StringIO
 
 st.set_page_config(page_title="Financial Chatbot", page_icon="📊")
 
@@ -15,8 +16,6 @@ if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
 if 'df' not in st.session_state:
     st.session_state.df = None
-if 'loaded_files' not in st.session_state:
-    st.session_state.loaded_files = []
 
 def get_drive_service():
     """Get Google Drive service."""
@@ -43,41 +42,49 @@ def get_drive_service():
         st.session_state.service = build('drive', 'v3', credentials=credentials)
         return st.session_state.service
     except Exception as e:
-        st.write(f"Error: {e}")
         return None
 
-def find_csv_files():
-    """Find preprocessed CSV files."""
+def load_all_csv_files():
+    """Download and combine all CSV files - FAST, NO PARSING!"""
     service = get_drive_service()
     if service is None:
-        return [], "No service"
+        return None, "No service"
     
-    # Search for _flat.csv files
+    # Find all _flat.csv files
     results = service.files().list(
         q="name contains '_flat.csv' and trashed=false",
         fields="files(id, name)",
-        pageSize=50
+        pageSize=100
     ).execute()
     
     files = results.get('files', [])
-    return files, len(files)
-
-def load_csv_from_gdrive(file_id):
-    """Load a CSV file from Google Drive."""
-    service = get_drive_service()
-    if service is None:
-        return None
+    if not files:
+        return None, "No CSV files found"
     
-    # Download as CSV
-    request = service.files().get_media(fileId=file_id)
-    content = request.execute()
+    all_dfs = []
+    file_list = []
     
-    # Parse CSV
-    from io import StringIO
-    df = pd.read_csv(StringIO(content.decode('utf-8')))
-    return df
+    for f in files:
+        try:
+            # Download CSV directly
+            request = service.files().get_media(fileId=f['id'])
+            content = request.execute()
+            
+            # Read CSV directly - NO PARSING NEEDED!
+            df = pd.read_csv(StringIO(content.decode('utf-8')))
+            all_dfs.append(df)
+            file_list.append(f['name'])
+            
+        except Exception as e:
+            continue
+    
+    if all_dfs:
+        combined = pd.concat(all_dfs, ignore_index=True)
+        return combined, file_list
+    
+    return None, []
 
-# Load credentials and test connection
+# Load credentials
 service = get_drive_service()
 
 st.title("📊 Financial Chatbot")
@@ -88,109 +95,74 @@ if service is None:
 else:
     st.success("Connected to Google Drive ✓")
 
-# Load data button
-if st.button("Load Financial Data from CSV"):
-    with st.spinner("Searching for CSV files..."):
-        files, count = find_csv_files()
-        
-        if count == 0:
-            st.error("No CSV files found! Make sure _flat.csv files are in Google Drive.")
-        else:
-            st.success(f"Found {count} CSV files!")
+# Load button
+if not st.session_state.data_loaded:
+    if st.button("Load Financial Data"):
+        with st.spinner("Downloading CSV files..."):
+            df, file_list = load_all_csv_files()
             
-            all_dfs = []
-            
-            with st.spinner(f"Loading {count} files..."):
-                progress_bar = st.progress(0)
-                
-                for i, f in enumerate(files):
-                    try:
-                        df = load_csv_from_gdrive(f['id'])
-                        df['_source_file'] = f['name']
-                        all_dfs.append(df)
-                        st.session_state.loaded_files.append(f['name'])
-                    except Exception as e:
-                        st.write(f"Error loading {f['name']}: {e}")
-                    
-                    progress_bar.progress((i + 1) / count)
-            
-            if all_dfs:
-                combined = pd.concat(all_dfs, ignore_index=True)
-                st.session_state.df = combined
+            if df is not None and len(df) > 0:
+                st.session_state.df = df
                 st.session_state.data_loaded = True
-                st.success(f"Loaded {len(combined)} records from {len(files)} files!")
+                st.session_state.files = file_list
+                st.success(f"✅ Loaded {len(df):,} records from {len(file_list)} files!")
                 st.rerun()
             else:
-                st.error("No data could be loaded")
+                st.error("Could not load data")
 
-# Show loaded data
+# Show data
 if st.session_state.data_loaded and st.session_state.df is not None:
     df = st.session_state.df
-    st.success(f"Data loaded: {len(df)} records from {len(st.session_state.loaded_files)} files")
     
-    # Show files loaded
-    st.markdown("### 📁 Files Loaded")
-    for f in st.session_state.loaded_files:
-        st.write(f"✓ {f}")
+    st.success(f"📊 Data loaded: {len(df):,} records from {len(st.session_state.files)} files")
     
-    # Show summary
-    st.markdown("### 📈 Data Summary")
+    # Show files
+    with st.expander("📁 Source Files", expanded=False):
+        for f in st.session_state.files:
+            st.write(f"✓ {f}")
     
-    # Show columns
-    st.write(f"Columns: {list(df.columns)}")
-    
-    # Show data by sheet
-    if 'Sheet_Name' in df.columns:
-        st.write(f"\nSheets: {df['Sheet_Name'].unique().tolist()}")
-    
-    # Show data by year/month
-    if 'Year' in df.columns:
-        st.write(f"Years: {sorted(df['Year'].unique())}")
-    if 'Month' in df.columns:
-        st.write(f"Months: {sorted(df['Month'].unique())}")
-    
-    # Calculate key metrics
+    # Key metrics
     st.markdown("### 💰 Key Metrics")
     
-    # Projected Gross Profit
+    col1, col2, col3 = st.columns(3)
+    
+    # Projected GP
     proj = df[df['Sheet_Name'] == 'Projection']
-    if not proj.empty and 'Trade' in proj.columns:
+    if not proj.empty:
         gp = proj[proj['Trade'].str.contains('Gross Profit', case=False, na=False)]
         if not gp.empty:
-            st.metric("Projected Gross Profit", f"${gp['Value'].sum():,.2f}")
+            col1.metric("Projected GP", f"${gp['Value'].sum():,.0f}")
     
-    # WIP Gross Profit
+    # WIP GP
     wip = df[(df['Sheet_Name'] == 'Financial Status') & (df['Financial_Type'] == 'Audit Report (WIP) J')]
-    if not wip.empty and 'Trade' in wip.columns:
+    if not wip.empty:
         gp = wip[wip['Trade'].str.contains('Gross Profit', case=False, na=False)]
         if not gp.empty:
-            st.metric("WIP Gross Profit", f"${gp['Value'].sum():,.2f}")
+            col2.metric("WIP GP", f"${gp['Value'].sum():,.0f}")
     
     # Cash Flow
     cf = df[df['Sheet_Name'] == 'Cash Flow']
-    if not cf.empty and 'Trade' in cf.columns:
+    if not cf.empty:
         gp = cf[cf['Trade'].str.contains('Gross Profit', case=False, na=False)]
         if not gp.empty:
-            st.metric("Cash Flow", f"${gp['Value'].sum():,.2f}")
+            col3.metric("Cash Flow", f"${gp['Value'].sum():,.0f}")
     
-    # Show sample
+    # Summary
+    st.markdown("### 📈 Summary")
+    st.write(f"Sheets: {df['Sheet_Name'].unique().tolist()}")
+    st.write(f"Years: {sorted(df['Year'].unique())}")
+    st.write(f"Months: {sorted(df['Month'].unique())}")
+    
+    # Sample
     with st.expander("Sample Data", expanded=False):
-        st.dataframe(df.head(10))
+        st.dataframe(df.head(5))
     
-    # Download button
+    # Download
     csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        "Download Data as CSV",
-        csv,
-        "financial_data.csv",
-        "text/csv",
-        key='download-csv'
-    )
-
-# Clear data button
-if st.session_state.data_loaded:
+    st.download_button("Download CSV", csv, "data.csv", "text/csv")
+    
+    # Clear
     if st.button("Clear Data"):
         st.session_state.data_loaded = False
         st.session_state.df = None
-        st.session_state.loaded_files = []
         st.rerun()
