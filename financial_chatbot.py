@@ -455,6 +455,7 @@ def handle_monthly_category(df, project, question):
         'labour': '2.4',
         'labor': '2.4',
         'lab': '2.4',
+        'manpower (labour) for works': '2.5',
         'manpower': '2.4',
         'manpower (labour)': '2.4',
         'subcontractor': '2.5',
