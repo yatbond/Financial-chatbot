@@ -6,7 +6,25 @@ import streamlit as st
 import pandas as pd
 import json
 import re
+import os
 from io import StringIO
+
+KB_FILE = 'chatbot_knowledge_base.json'
+
+def load_knowledge_base():
+    """Load knowledge base from file."""
+    if os.path.exists(KB_FILE):
+        try:
+            with open(KB_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_knowledge_base(kb):
+    """Save knowledge base to file."""
+    with open(KB_FILE, 'w') as f:
+        json.dump(kb, f, indent=2)
 
 st.set_page_config(page_title="Financial Chatbot", page_icon="📊")
 
@@ -28,7 +46,8 @@ if 'available_years' not in st.session_state:
 if 'available_months' not in st.session_state:
     st.session_state.available_months = []
 if 'query_knowledge_base' not in st.session_state:
-    st.session_state.query_knowledge_base = {}  # Maps query -> best match filters
+    # Load knowledge base from file
+    st.session_state.query_knowledge_base = load_knowledge_base()
 
 def get_drive_service():
     """Get Google Drive service."""
@@ -676,6 +695,8 @@ if st.session_state.data_loaded and st.session_state.projects:
                             # Save to knowledge base (normalize query for matching)
                             normalized_q = st.session_state.pending_question.lower().strip()
                             st.session_state.query_knowledge_base[normalized_q] = match
+                            # Persist to file
+                            save_knowledge_base(st.session_state.query_knowledge_base)
                             st.session_state.pending_question = None
                             st.session_state.pending_matches = []
                             st.rerun()
@@ -696,6 +717,12 @@ if st.session_state.data_loaded and st.session_state.projects:
         
         if st.button("Clear Chat"):
             st.session_state.chat_history = []
+            st.rerun()
+        
+        # Clear knowledge base
+        if st.button("Reset Preferences"):
+            st.session_state.query_knowledge_base = {}
+            save_knowledge_base({})
             st.rerun()
         
         with st.expander("📊 Project Data Summary", expanded=False):
