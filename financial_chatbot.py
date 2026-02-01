@@ -1,6 +1,6 @@
 """
 Financial Chatbot - Streamlit Web App
-Clean interface with project selection
+Clean interface with project selection and Q&A chatbot
 """
 import streamlit as st
 import pandas as pd
@@ -21,6 +21,8 @@ if 'projects' not in st.session_state:
     st.session_state.projects = {}
 if 'selected_project' not in st.session_state:
     st.session_state.selected_project = None
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
 
 def get_drive_service():
     """Get Google Drive service."""
@@ -130,12 +132,6 @@ def get_project_metrics(df, project):
     
     metrics = {}
     
-    # Get latest time period for this project
-    if 'Month' in project_df.columns:
-        latest_month = project_df['Month'].max()
-    else:
-        latest_month = None
-    
     # Filter by Item_Code = '3' (string) and Data_Type contains "Gross Profit"
     gp_filter = (project_df['Item_Code'] == '3') & \
                 (project_df['Data_Type'].str.contains('Gross Profit', case=False, na=False))
@@ -170,6 +166,135 @@ def get_project_metrics(df, project):
     
     return metrics
 
+
+def find_best_match(df, search_text):
+    """
+    Find the best matching Financial_Type or Data_Type based on search text.
+    Returns (matched_column, matched_value, matched_df)
+    """
+    search_lower = search_text.lower()
+    
+    # Get unique values from Financial_Type and Data_Type
+    financial_types = df['Financial_Type'].dropna().unique().tolist()
+    data_types = df['Data_Type'].dropna().unique().tolist()
+    
+    best_match = None
+    best_score = 0
+    matched_column = None
+    
+    # Score each potential match
+    for ft in financial_types:
+        score = 0
+        ft_lower = ft.lower()
+        
+        # Direct substring match
+        if search_lower in ft_lower:
+            score += 10
+        # Word-by-word matching
+        search_words = set(search_lower.split())
+        ft_words = set(ft_lower.split())
+        score += len(search_words & ft_words) * 5
+        
+        if score > best_score:
+            best_score = score
+            best_match = ft
+            matched_column = 'Financial_Type'
+    
+    for dt in data_types:
+        score = 0
+        dt_lower = dt.lower()
+        
+        if search_lower in dt_lower:
+            score += 10
+        search_words = set(search_lower.split())
+        dt_words = set(dt_lower.split())
+        score += len(search_words & dt_words) * 5
+        
+        if score > best_score:
+            best_score = score
+            best_match = dt
+            matched_column = 'Data_Type'
+    
+    return matched_column, best_match
+
+
+def answer_question(df, project, question):
+    """Answer a user question about the project data."""
+    project_df = df[df['_project'] == project]
+    question_lower = question.lower()
+    
+    # Get latest month if not specified
+    latest_month = project_df['Month'].max()
+    target_month = latest_month
+    
+    # Check if user specified a month
+    month_names = ['january', 'february', 'march', 'april', 'may', 'june',
+                   'july', 'august', 'september', 'october', 'november', 'december']
+    month_abbr = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+    
+    for i, m in enumerate(month_names):
+        if m in question_lower:
+            target_month = i + 1
+            break
+    else:
+        for i, m in enumerate(month_abbr):
+            if m in question_lower:
+                target_month = i + 1
+                break
+    
+    # Check for year specification
+    year_match = re.search(r'202[0-9]', question)
+    target_year = project_df['Year'].max() if year_match is None else int(year_match.group())
+    
+    # Determine Item_Code: default to '3' (before adjustment) unless specified
+    item_code = '3'
+    if 'after adjustment' in question_lower or 'adjusted' in question_lower:
+        item_code = '5'  # After adjustment
+    
+    # Check for Gross Profit
+    is_gross_profit = 'gross profit' in question_lower or 'gp' in question_lower
+    
+    # Find best match from Financial_Type or Data_Type
+    matched_column, matched_value = find_best_match(df, question)
+    
+    # Build filter
+    filters = {
+        'Sheet_Name': 'Financial Status',  # Default to Financial Status sheet
+        'Month': target_month,
+        'Year': target_year,
+    }
+    
+    if item_code:
+        filters['Item_Code'] = item_code
+    
+    if matched_column and matched_value:
+        filters[matched_column] = matched_value
+    
+    # Apply filters
+    result_df = project_df.copy()
+    for col, val in filters.items():
+        result_df = result_df[result_df[col] == val]
+    
+    if is_gross_profit:
+        result_df = result_df[result_df['Data_Type'].str.contains('Gross Profit', case=False, na=False)]
+    
+    # Generate response
+    if result_df.empty:
+        return f"No data found for '{matched_value or question}' with Item Code {item_code}."
+    
+    total_value = result_df['Value'].sum()
+    
+    response = f"**{matched_value or question}**\n\n"
+    response += f"Value: **${total_value:,.0f}** ('000)\n"
+    response += f"Records found: {len(result_df)}\n"
+    response += f"Month: {target_month}/{target_year}\n"
+    
+    if matched_column:
+        response += f"Matched from: {matched_column}\n"
+    
+    return response
+
+
 # Load credentials
 service = get_drive_service()
 
@@ -192,6 +317,7 @@ if not st.session_state.data_loaded:
                 st.session_state.data_loaded = True
                 st.session_state.projects = projects
                 st.session_state.selected_project = None
+                st.session_state.chat_history = []
                 st.success(f"✅ Loaded {len(projects)} projects with {len(df):,} records!")
                 st.rerun()
             else:
@@ -224,7 +350,7 @@ if st.session_state.data_loaded and st.session_state.projects:
         metrics = get_project_metrics(st.session_state.df, project)
         
         if metrics:
-            st.markdown("### 💰 Key Metrics")
+            st.markdown("### 💰 Key Metrics ('000)")
             
             col1, col2, col3, col4 = st.columns(4)
             
@@ -240,10 +366,35 @@ if st.session_state.data_loaded and st.session_state.projects:
         else:
             st.warning("No metrics available for this project")
         
-        # Show data summary
-        project_df = st.session_state.df[st.session_state.df['_project'] == project]
+        # Chatbot section
+        st.markdown("### 💬 Ask about this Project ('000)")
+        st.markdown("*Ask about financial data. I'll find the best match from Financial_Type or Data_Type.*")
         
+        # Chat input
+        with st.form("chat_form"):
+            user_question = st.text_input("Your question:", placeholder="e.g., What is the Gross Profit?")
+            submitted = st.form_submit_button("Ask")
+            
+            if submitted and user_question:
+                answer = answer_question(st.session_state.df, project, user_question)
+                st.session_state.chat_history.append({"q": user_question, "a": answer})
+        
+        # Show chat history
+        if st.session_state.chat_history:
+            st.markdown("---")
+            for i, chat in enumerate(st.session_state.chat_history):
+                st.markdown(f"**Q:** {chat['q']}")
+                st.markdown(chat['a'])
+                st.markdown("---")
+        
+        # Clear chat button
+        if st.button("Clear Chat"):
+            st.session_state.chat_history = []
+            st.rerun()
+        
+        # Show data summary
         with st.expander("📊 Project Data Summary", expanded=False):
+            project_df = st.session_state.df[st.session_state.df['_project'] == project]
             st.write(f"Total records: {len(project_df)}")
             st.write(f"Sheets: {project_df['Sheet_Name'].unique().tolist()}")
             st.write(f"Months: {sorted(project_df['Month'].unique())}")
@@ -261,4 +412,5 @@ if st.session_state.data_loaded:
         st.session_state.df = None
         st.session_state.projects = {}
         st.session_state.selected_project = None
+        st.session_state.chat_history = []
         st.rerun()
