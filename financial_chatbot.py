@@ -31,6 +31,7 @@ ACRONYMS = {
     'plant': 'plant and machinery',
     'machinery': 'plant and machinery',
     'lab': 'labour',
+    'manpower': 'manpower (labour)',
 }
 
 def expand_acronyms(text):
@@ -454,6 +455,8 @@ def handle_monthly_category(df, project, question):
         'labour': '2.4',
         'labor': '2.4',
         'lab': '2.4',
+        'manpower': '2.4',
+        'manpower (labour)': '2.4',
         'subcontractor': '2.5',
         'subcon': '2.5',
         'staff': '2.6',
@@ -471,29 +474,18 @@ def handle_monthly_category(df, project, question):
     category_prefix = None
     category_name = None
 
+    # First expand acronyms in the question
+    question_expanded = expand_acronyms(question_lower)
+
     # Check each category keyword - longer phrases first to avoid partial matches
     sorted_keywords = sorted(category_keywords.items(), key=lambda x: len(x[0]), reverse=True)
-    category_prefix = None
-    category_name = None
 
     for kw, prefix in sorted_keywords:
-        # Also check expanded version of keyword
-        kw_expanded = expand_acronyms(kw)
-        # Check if keyword (or its expanded form) is in the question
-        if kw in question_lower or kw_expanded in question_lower:
+        # Check if keyword is in the expanded question
+        if kw in question_expanded:
             category_prefix = prefix
             category_name = kw
             break
-
-    # If still not found, try checking if any category keyword matches after expanding the entire question
-    if not category_prefix:
-        question_expanded = expand_acronyms(question_lower)
-        for kw, prefix in sorted_keywords:
-            kw_expanded = expand_acronyms(kw)
-            if kw in question_expanded or kw_expanded in question_expanded:
-                category_prefix = prefix
-                category_name = kw
-                break
 
     if not is_monthly_query or not category_prefix:
         return None
