@@ -1,6 +1,6 @@
 {
   "buildCommand": "pip install streamlit pandas google-auth google-auth-oauthlib google-api-python-client openpyxl",
-  "devCommand": "streamlit run financial_chatbot.py",
+  "devCommand": "streamlit run excel_chatbot.py",
   "installCommand": "pip install streamlit pandas google-auth google-auth-oauthlib google-api-python-client openpyxl",
   "framework": null
 }

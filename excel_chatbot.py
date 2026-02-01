@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 import pickle
 from pathlib import Path
+from financial_chatbot import initialize, get_projected_gross_profit, get_wip_gross_profit, get_cash_flow
 
 
 # Page config
@@ -24,6 +25,22 @@ def load_data():
         with open(data_path, 'rb') as f:
             return pickle.load(f)
     return None
+
+
+def get_financial_summary():
+    """Get the three key financial metrics using correct query functions."""
+    try:
+        # Initialize the financial chatbot (uses G: drive data)
+        initialize()
+        
+        return {
+            'projected_gross_profit': get_projected_gross_profit(),
+            'wip_gross_profit': get_wip_gross_profit(),
+            'cash_flow': get_cash_flow()
+        }
+    except Exception as e:
+        st.error(f"Error loading financial data: {e}")
+        return {'projected_gross_profit': 0, 'wip_gross_profit': 0, 'cash_flow': 0}
 
 
 def get_answer(data: dict, question: str, selected_sheet: str) -> str:
@@ -136,42 +153,27 @@ def get_answer(data: dict, question: str, selected_sheet: str) -> str:
 
 def main():
     # Title
-    st.title("📊 Excel Chatbot")
-    st.caption("Ask questions about your construction project financial data")
+    st.title("📊 Financial Chatbot")
+    st.caption("Construction Project Financial Data Analysis")
     
-    # Load data
-    data = load_data()
-    
-    if data is None:
-        st.error("No data found. Please run excel_parser.py first.")
+    # Initialize financial chatbot (loads from G: drive)
+    try:
+        initialize()
+    except Exception as e:
+        st.error(f"Error initializing: {e}")
         return
     
-    # Show metadata
-    with st.expander("📋 Project Information", expanded=False):
-        metadata = data.get('metadata', {})
-        for key, value in metadata.items():
-            st.text(f"{key.replace('_', ' ').title()}: {value}")
+    # Get financial summary using correct query functions
+    summary = get_financial_summary()
     
-    # Sidebar - Sheet selection
-    st.sidebar.title("📁 Sheet Selection")
-    sheets = list(data['sheets'].keys())
-    selected_sheet = st.sidebar.selectbox("Choose a sheet:", sheets)
+    # Display key metrics at the top
+    st.markdown("### 📈 Financial Summary (December 2025)")
+    cols = st.columns(3)
+    cols[0].metric("Projected Gross Profit (bf adj)", f"${summary['projected_gross_profit']:,.2f}")
+    cols[1].metric("WIP Gross Profit (bf adj)", f"${summary['wip_gross_profit']:,.2f}")
+    cols[2].metric("Cash Flow", f"${summary['cash_flow']:,.2f}")
     
-    # Show sheet info
-    df = data['sheets'][selected_sheet]
-    st.sidebar.text(f"Rows: {len(df)}")
-    st.sidebar.text(f"Columns: {len(df.columns)}")
-    
-    # Show column names
-    st.sidebar.markdown("### Columns")
-    for col in df.columns:
-        st.sidebar.text(f"- {col}")
-    
-    # Main content - Data preview
-    with st.expander("📊 Data Preview", expanded=False):
-        st.dataframe(df, use_container_width=True)
-    
-    # Chat interface
+    # Show data from financial_chatbot
     st.markdown("---")
     st.subheader("💬 Ask about your data")
     
@@ -185,34 +187,111 @@ def main():
             st.markdown(message["content"])
     
     # Chat input
-    if prompt := st.chat_input("Ask a question about your data..."):
+    if prompt := st.chat_input("Ask a question about your financial data..."):
         # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        # Generate response
+        # Generate response using financial_chatbot query
         with st.chat_message("assistant"):
-            response = get_answer(data, prompt, selected_sheet)
+            from financial_chatbot import query
+            response = answer_question(prompt)
             st.markdown(response)
         
         # Add assistant message to chat history
         st.session_state.messages.append({"role": "assistant", "content": response})
+
+
+def answer_question(question):
+    """Answer questions using financial_chatbot query functions."""
+    question = question.lower()
     
-    # Quick questions
-    st.markdown("### � Quick Questions")
-    cols = st.columns(3)
-    questions = [
-        ("Total Budget", "What is the total budget?"),
-        ("Total Committed", "What is the total committed value?"),
-        ("All Totals", "Show all column totals"),
-    ]
-    for i, (label, question) in enumerate(questions):
-        if cols[i].button(label):
-            response = get_answer(data, question, selected_sheet)
-            st.session_state.messages.append({"role": "user", "content": question})
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            st.rerun()
+    # Check for specific financial metrics
+    if 'projected gross profit' in question:
+        val = get_projected_gross_profit()
+        return f"Projected Gross Profit (before adjustment): ${val:,.2f}"
+    
+    if 'wip gross profit' in question or 'wip gp' in question:
+        val = get_wip_gross_profit()
+        return f"WIP Gross Profit (before adjustment): ${val:,.2f}"
+    
+    if 'cash flow' in question:
+        val = get_cash_flow()
+        return f"Cash Flow: ${val:,.2f}"
+    
+    if 'total' in question or 'sum' in question:
+        # Generic total query
+        result = query()
+        if not result.empty:
+            total = result['Value'].sum()
+            return f"Total value across all data: ${total:,.2f}"
+    
+    if 'how many' in question or 'count' in question:
+        result = query()
+        if not result.empty:
+            return f"Total data points: {len(result)}"
+    
+    if 'projection' in question:
+        result = query(Sheet_Name='Projection')
+        if not result.empty:
+            return f"Projection data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
+    
+    if 'audit report' in question or 'wip' in question:
+        result = query(Sheet_Name='Financial Status', Financial_Type='Audit Report (WIP) J')
+        if not result.empty:
+            return f"Audit Report (WIP) data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
+    
+    if 'financial status' in question:
+        result = query(Sheet_Name='Financial Status')
+        if not result.empty:
+            return f"Financial Status data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
+    
+    if 'cash flow' in question:
+        result = query(Sheet_Name='Cash Flow')
+        if not result.empty:
+            return f"Cash Flow data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
+    
+    if 'accrual' in question:
+        result = query(Sheet_Name='Accrual')
+        if not result.empty:
+            return f"Accrual data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
+    
+    if 'committed cost' in question:
+        result = query(Sheet_Name='Committed Cost')
+        if not result.empty:
+            return f"Committed Cost data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
+    
+    if 'budget' in question:
+        result = query(Financial_Type='1st Working Budget B')
+        if not result.empty:
+            return f"1st Working Budget data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
+    
+    if 'tender' in question:
+        result = query(Financial_Type='Tender A')
+        if not result.empty:
+            return f"Tender A data: {len(result)} records\nTotal value: ${result['Value'].sum():,.2f}"
+    
+    if 'gross profit' in question:
+        result = query()
+        if not result.empty:
+            # Filter for Gross Profit trades
+            gp = result[result['Trade'].str.contains('Gross Profit', case=False, na=False)]
+            if not gp.empty:
+                return f"Gross Profit data: {len(gp)} records\nTotal value: ${gp['Value'].sum():,.2f}"
+    
+    if 'item' in question:
+        result = query()
+        if not result.empty:
+            items = result['Item_Code'].unique()
+            return f"Available Item Codes: {len(items)} items\nExamples: {', '.join(items[:10])}"
+    
+    return f"I found {len(query())} total records in the financial database. Try asking about:\n" \
+           f"- Projected Gross Profit\n" \
+           f"- WIP Gross Profit\n" \
+           f"- Cash Flow\n" \
+           f"- Budget/Projection/Audit Report totals\n" \
+           f"- Specific sheets (Financial Status, Projection, Cash Flow, etc.)"
 
 
 if __name__ == "__main__":

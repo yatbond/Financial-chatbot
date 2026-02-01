@@ -1,975 +1,268 @@
 """
-Financial Chatbot Web App
-Analyzes construction project financial data from Google Drive Excel files.
-
-Folder Structure Expected:
-- Year/
-  - Month/
-    - Project Name/
-      - Excel files (.xlsx)
-
-Features:
-- Google Drive integration for file access
-- Automatic CSV parsing and caching
-- Interactive project selection
-- Natural language financial queries
+Financial Chatbot with Auto-Preprocessing
+Automatically converts Excel files to CSV on first run.
+Provides query functions for financial data.
 """
 
-import streamlit as st
-import pandas as pd
-import json
 import os
-import pickle
-from pathlib import Path
-from datetime import datetime
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-import re
+import pandas as pd
+from financial_preprocessor import preprocess_folder, load_all_data, METADATA_FILE, DEFAULT_DATA_ROOT, GDRIVE_SOURCE
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
-# Google Drive folder name (root folder to search for Year/Month/Project structure)
-DRIVE_ROOT_FOLDER_NAME = "Ai Chatbot Knowledge Base"  # Folder name to search for
-
-# Local cache directory for parsed CSVs
-CACHE_DIR = Path(__file__).parent / "financial_data_cache"
-CACHE_DIR.mkdir(exist_ok=True)
-
-# Token file for Google Drive authentication
-TOKEN_FILE = "token_drive.pickle"
-
-# CSV criteria file (reference)
-CRITERIA_FILE = Path(__file__).parent / "CSV_Formatting_Criteria.md"
-
-# ============================================================================
-# GOOGLE DRIVE FUNCTIONS
-# ============================================================================
-
-SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-
-def get_drive_root_folder(service):
-    """Find the root folder by name."""
-    try:
-        query = f"mimeType='application/vnd.google-apps.folder' and name='{DRIVE_ROOT_FOLDER_NAME}'"
-        results = service.files().list(
-            q=query,
-            fields="files(id, name)"
-        ).execute()
-        
-        files = results.get('files', [])
-        if files:
-            return files[0]
-        else:
-            st.error(f"Folder '{DRIVE_ROOT_FOLDER_NAME}' not found in Google Drive!")
-            return None
-    except HttpError as e:
-        st.error(f"Error finding root folder: {e}")
-        return None
+# In-memory cache
+_data_cache = None
 
 
-def get_drive_service():
-    """Get authenticated Google Drive service."""
-    creds = None
+def initialize(data_root=None, force_reprocess=False):
+    """
+    Initialize the chatbot.
+    Preprocesses all Excel files if needed.
+    """
+    global _data_cache
     
-    # Load existing token
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, 'rb') as token:
-            creds = pickle.load(token)
+    root = data_root or DEFAULT_DATA_ROOT
     
-    # If no credentials, authenticate
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            # Check for Streamlit Cloud secrets first
-            try:
-                # Method 1: google_credentials as a JSON string
-                if 'google_credentials' in st.secrets:
-                    import json as json_module
-                    creds_json = st.secrets['google_credentials']
-                    if isinstance(creds_json, str):
-                        creds_dict = json_module.loads(creds_json)
-                    else:
-                        creds_dict = creds_json
-                    
-                    # Check if service account
-                    if creds_dict.get('type') == 'service_account':
-                        from google.oauth2 import service_account
-                        creds = service_account.Credentials.from_service_account_info(
-                            creds_dict, scopes=SCOPES
-                        )
-                    else:
-                        # Regular OAuth flow (needs browser - won't work on cloud)
-                        import tempfile
-                        creds_file = Path(tempfile.gettempdir()) / "credentials.json"
-                        with open(creds_file, 'w') as f:
-                            json_module.dump(creds_dict, f)
-                        
-                        flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
-                        creds = flow.run_local_server(port=0)
-                
-                # Method 2: 'installed' or 'web' keys directly (OAuth)
-                elif 'installed' in st.secrets or 'web' in st.secrets:
-                    import json as json_module
-                    creds_dict = {k: dict(v) if hasattr(v, 'keys') else v for k, v in st.secrets.items()}
-                    creds_file = Path(tempfile.gettempdir()) / "credentials.json"
-                    with open(creds_file, 'w') as f:
-                        json_module.dump(creds_dict, f)
-                    
-                    flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
-                    creds = flow.run_local_server(port=0)
-                else:
-                    raise FileNotFoundError("No credentials in secrets")
-            except Exception:
-                # Fall back to local credentials.json file
-                creds_file = Path(__file__).parent / "credentials.json"
-                if not creds_file.exists():
-                    return None
-                
-                flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), SCOPES)
-                creds = flow.run_local_server(port=0)
-        
-        # Save token
-        with open(TOKEN_FILE, 'wb') as token:
-            pickle.dump(creds, token)
+    print(f"Initializing Financial Chatbot...")
+    print(f"Data root: {root}")
+    print(f"Force reprocess: {force_reprocess}")
     
-    try:
-        service = build('drive', 'v3', credentials=creds)
-        
-        # Verify root folder exists
-        root_folder = get_drive_root_folder(service)
-        if root_folder:
-            st.session_state.root_folder_id = root_folder['id']
-            st.session_state.root_folder_name = root_folder['name']
-        
-        return service
-    except Exception as e:
-        st.error(f"Error building Drive service: {e}")
-        return None
-
-
-def list_folders(service, parent_id=None, folder_name=None):
-    """List folders in Google Drive."""
-    try:
-        query = "mimeType='application/vnd.google-apps.folder'"
-        if parent_id:
-            query += f" and '{parent_id}' in parents"
-        if folder_name:
-            query += f" and name='{folder_name}'"
-        
-        results = service.files().list(
-            q=query,
-            fields="files(id, name, modifiedTime)"
-        ).execute()
-        
-        return results.get('files', [])
-    except HttpError as e:
-        st.error(f"Error listing folders: {e}")
-        return []
-
-
-def find_excel_files_in_month(service, month_folder_id):
-    """Find Excel files in month folder AND all subfolders."""
-    try:
-        all_files = []
-        
-        # Find files directly in month folder
-        query_direct = f"('{month_folder_id}' in parents)"
-        results_direct = service.files().list(
-            q=query_direct,
-            fields="files(id, name, mimeType, modifiedTime)"
-        ).execute()
-        
-        files_direct = results_direct.get('files', [])
-        all_files.extend(files_direct)
-        
-        # Also find subfolders and search inside them
-        query_folders = f"mimeType='application/vnd.google-apps.folder' and '{month_folder_id}' in parents"
-        results_folders = service.files().list(
-            q=query_folders,
-            fields="files(id, name)"
-        ).execute()
-        
-        subfolders = results_folders.get('files', [])
-        
-        # Search each subfolder
-        for subfolder in subfolders:
-            query_sub = f"'{subfolder['id']}' in parents"
-            results_sub = service.files().list(
-                q=query_sub,
-                fields="files(id, name, mimeType, modifiedTime)"
-            ).execute()
-            all_files.extend(results_sub.get('files', []))
-        
-        # Filter for Excel files (xlsx or Google Sheets)
-        excel_files = []
-        for f in all_files:
-            name = f.get('name', '').lower()
-            mime = f.get('mimeType', '')
-            if ('.xlsx' in name or '.xls' in name or 
-                mime == 'application/vnd.google-apps.spreadsheet' or
-                name.endswith('.xlsx') or name.endswith('.xls')):
-                excel_files.append(f)
-        
-        return excel_files
-    except HttpError as e:
-        st.error(f"Error searching files: {e}")
-        return []
-    except HttpError as e:
-        st.error(f"Error searching files: {e}")
-        return []
-
-
-def get_or_create_project_folder(service, month_folder_id, project_name):
-    """Get project folder or create if not exists."""
-    # Search for project folder
-    query = f"mimeType='application/vnd.google-apps.folder' and name='{project_name}' and '{month_folder_id}' in parents"
-    results = service.files().list(q=query, fields="files(id, name)").execute()
+    if force_reprocess:
+        print("\n[WARN] Repreprocessing all files...")
+        preprocess_folder(root, force=True)
     
-    if results.get('files'):
-        return results['files'][0]
+    print("\nLoading preprocessed data...")
+    _data_cache = load_all_data(root)
     
-    return None
+    print(f"\n[OK] Financial Chatbot Ready!")
+    print(f"  Total records: {len(_data_cache) if not _data_cache.empty else 0}")
+    print(f"  Data index: {os.path.join(root, METADATA_FILE)}")
+    
+    return _data_cache
 
 
-def download_and_parse_excel(service, file_id, file_name, cache_dir):
-    """Download Excel file, parse it, and save as CSV."""
-    # Check cache first
-    cache_file = cache_dir / f"{file_id}.csv"
-    cache_meta = cache_dir / f"{file_id}_meta.json"
-    
-    # Get file modified time
-    file_metadata = service.files().get(fileId=file_id, fields="modifiedTime").execute()
-    modified_time = file_metadata.get('modifiedTime')
-    
-    # Check if cached version exists and is up to date
-    if cache_file.exists() and cache_meta.exists():
-        with open(cache_meta, 'r') as f:
-            meta = json.load(f)
-        if meta.get('modifiedTime') == modified_time:
-            # Load and return cached data
-            df = pd.read_csv(cache_file)
-            return df, meta
-    
-    # Download and parse
-    try:
-        from io import BytesIO
-        request = service.files().get_media(fileId=file_id)
-        file_content = request.execute()
-        
-        # Parse Excel
-        excel_file = BytesIO(file_content)
-        xl = pd.ExcelFile(excel_file)
-        
-        all_data = {'sheets': {}, 'metadata': {}}
-        
-        # Parse Financial Status (simplified)
-        if 'Financial Status' in xl.sheet_names:
-            df_financial = parse_financial_status_sheet(excel_file)
-            all_data['sheets']['Financial_Status'] = df_financial
-        
-        # Parse other sheets
-        for sheet_name in ['Projection', 'Committed Cost', 'Accrual', 'Cash Flow']:
-            if sheet_name in xl.sheet_names:
-                df = parse_monthly_sheet(excel_file, sheet_name)
-                all_data['sheets'][sheet_name.replace(' ', '_')] = df
-        
-        # Save to cache
-        df_combined = combine_all_data(all_data)
-        df_combined.to_csv(cache_file, index=False)
-        
-        # Save metadata
-        meta = {
-            'file_id': file_id,
-            'file_name': file_name,
-            'modifiedTime': modified_time,
-            'sheet_count': len(all_data['sheets'])
-        }
-        with open(cache_meta, 'w') as f:
-            json.dump(meta, f)
-        
-        return df_combined, meta
-    
-    except Exception as e:
-        st.error(f"Error parsing {file_name}: {e}")
-        return None, None
+def get_data():
+    """Get the loaded data frame."""
+    global _data_cache
+    if _data_cache is None or _data_cache.empty:
+        initialize()
+    return _data_cache
 
 
-def parse_financial_status_sheet(excel_content):
-    """Parse Financial Status sheet from Excel content."""
-    try:
-        df = pd.read_excel(excel_content, sheet_name='Financial Status', header=None)
-        
-        # Project info (simplified extraction)
-        project_info = {
-            'project_code': str(df.iloc[2, 1]).strip() if pd.notna(df.iloc[2, 1]) else '',
-            'project_name': str(df.iloc[3, 1]).strip() if pd.notna(df.iloc[3, 1]) else '',
-            'report_date': str(df.iloc[4, 1]).strip() if pd.notna(df.iloc[4, 1]) else '',
-        }
-        
-        # Extract data rows (simplified columns)
-        data_rows = []
-        for idx in range(15, len(df)):
-            item_code = df.iloc[idx, 0]
-            if pd.isna(item_code) or str(item_code).strip() == '':
-                continue
-            
-            item_str = str(item_code).strip()
-            trade = df.iloc[idx, 1] if pd.notna(df.iloc[idx, 1]) else ''
-            
-            # Extract key columns
-            row_data = {
-                'Item': item_str,
-                'Trade': str(trade).strip(),
-            }
-            
-            # Extract numeric columns dynamically
-            for col_idx in range(2, len(df.columns)):
-                col_header = str(df.iloc[7, col_idx]).strip() if pd.notna(df.iloc[7, col_idx]) else ''
-                if col_header:
-                    value = df.iloc[idx, col_idx]
-                    if pd.notna(value):
-                        try:
-                            row_data[col_header] = float(value)
-                        except (ValueError, TypeError):
-                            row_data[col_header] = str(value)
-                    else:
-                        row_data[col_header] = 0.0
-            
-            data_rows.append(row_data)
-        
-        df_result = pd.DataFrame(data_rows)
-        return df_result
+def query(**filters):
+    """
+    Query the financial data.
     
-    except Exception as e:
-        st.error(f"Error parsing Financial Status: {e}")
+    Examples:
+        query(Year=2025, Month=12)
+        query(Sheet_Name='Projection', Item_Code='1.1')
+        query(Financial_Type='1st Working Budget B', Trade='Income')
+        query(Year=2025, Sheet_Name=['Projection', 'Committed Cost'])
+    """
+    df = get_data()
+    if df.empty:
         return pd.DataFrame()
-
-
-def parse_monthly_sheet(excel_content, sheet_name):
-    """Parse monthly sheet (Projection, Committed Cost, Accrual, Cash Flow)."""
-    try:
-        df = pd.read_excel(excel_content, sheet_name=sheet_name, header=None)
-        
-        # Data rows start from row 14
-        data_rows = []
-        for idx in range(14, len(df)):
-            item_code = df.iloc[idx, 0]
-            if pd.isna(item_code) or str(item_code).strip() == '':
-                continue
-            
-            row_data = {'Item': str(item_code).strip()}
-            
-            # Extract columns based on standard structure
-            col_mappings = {
-                1: 'Trade',
-                2: 'Original_Budget',
-                3: 'Approved_PO',
-                4: 'Pending_PO',
-                5: 'Commitments',
-                6: 'Forecast',
-                7: 'Variance',
-                8: 'April',
-                9: 'May',
-                10: 'June',
-                11: 'July',
-                12: 'August',
-                13: 'September',
-                14: 'October',
-                15: 'November',
-                16: 'December',
-                17: 'January',
-                18: 'February',
-                19: 'March',
-            }
-            
-            for col_idx, col_name in col_mappings.items():
-                if col_idx < len(df.columns):
-                    value = df.iloc[idx, col_idx]
-                    if pd.notna(value):
-                        try:
-                            row_data[col_name] = float(value)
-                        except (ValueError, TypeError):
-                            row_data[col_name] = str(value)
-                    else:
-                        row_data[col_name] = 0.0
-            
-            data_rows.append(row_data)
-        
-        df_result = pd.DataFrame(data_rows)
-        return df_result
     
-    except Exception as e:
-        st.error(f"Error parsing {sheet_name}: {e}")
+    result = df.copy()
+    
+    for key, value in filters.items():
+        if key not in df.columns:
+            continue
+        
+        if isinstance(value, list):
+            result = result[result[key].isin(value)]
+        else:
+            result = result[result[key] == value]
+    
+    return result
+
+
+def query_by_month(year, month):
+    """Get all data for a specific month."""
+    return query(Year=year, Month=month)
+
+
+def query_by_sheet(sheet_name):
+    """Get all data from a specific sheet."""
+    return query(Sheet_Name=sheet_name)
+
+
+def query_by_item(item_code):
+    """Get all data for a specific item code."""
+    return query(Item_Code=item_code)
+
+
+def query_by_trade(trade_name):
+    """Get all data for a specific trade."""
+    return query(Trade=trade_name)
+
+
+def summary_by_sheet():
+    """Get summary statistics grouped by sheet."""
+    df = get_data()
+    if df.empty:
+        return {}
+    
+    return df.groupby('Sheet_Name').agg({
+        'Value': ['sum', 'mean', 'count']
+    }).round(2)
+
+
+def summary_by_month():
+    """Get summary statistics grouped by month."""
+    df = get_data()
+    if df.empty:
+        return {}
+    
+    return df.groupby('Month')['Value'].agg(['sum', 'count']).round(2)
+
+
+def list_available_years():
+    """List all available years in the data."""
+    df = get_data()
+    if 'Year' in df.columns:
+        return sorted(df['Year'].unique().tolist())
+    return []
+
+
+def list_available_sheets():
+    """List all available sheet names."""
+    df = get_data()
+    if 'Sheet_Name' in df.columns:
+        return sorted(df['Sheet_Name'].unique().tolist())
+    return []
+
+
+def list_available_months():
+    """List all available months."""
+    df = get_data()
+    if 'Month' in df.columns:
+        return sorted(df['Month'].unique().tolist())
+    return []
+
+
+# Quick query helpers
+def show_projection_by_month(item_code='1.1'):
+    """Show projection values by month for an item."""
+    proj = query(Sheet_Name='Projection', Item_Code=item_code)
+    if proj.empty:
         return pd.DataFrame()
+    return proj.pivot_table(index='Item_Code', columns='Month', values='Value', aggfunc='sum')
 
 
-def combine_all_data(all_data):
-    """Combine data from multiple sheets into a single DataFrame."""
-    all_dfs = []
-    
-    for sheet_name, df in all_data['sheets'].items():
-        if not df.empty:
-            df_copy = df.copy()
-            df_copy['Source'] = sheet_name
-            all_dfs.append(df_copy)
-    
-    if all_dfs:
-        combined = pd.concat(all_dfs, ignore_index=True)
-        # Consolidate duplicates by Item
-        if 'Item' in combined.columns:
-            combined = combined.groupby('Item').agg(lambda x: x.first_valid_index() if x.isna().all() else x.sum(min_count=1)).reset_index()
-        return combined
-    
-    return pd.DataFrame()
+def show_financial_status_summary():
+    """Show financial status summary."""
+    fs = query(Sheet_Name='Financial Status')
+    if fs.empty:
+        return pd.DataFrame()
+    return fs.pivot_table(index=['Item_Code', 'Trade'], columns='Financial_Type', values='Value')
 
 
-def find_project_files(service, year_folder_id, month_folder_id):
-    """Find Excel files in year and month folders."""
-    # Find files in year folder
-    year_files = find_excel_files_in_month(service, year_folder_id)
+def compare_budget_vs_actual():
+    """Compare budget (Tender, 1st Working Budget) vs actual (Audit Report, Projection)."""
+    budget_types = ['Tender A', '1st Working Budget B']
+    actual_types = ['Audit Report (WIP) J', 'Projection as at I']
     
-    # Find files in month folder  
-    month_files = find_excel_files_in_month(service, month_folder_id)
+    df = query(Financial_Type=budget_types + actual_types)
+    if df.empty:
+        return pd.DataFrame()
     
-    # Combine and deduplicate
-    all_files = {}
-    for f in year_files + month_files:
-        all_files[f['id']] = f
-    
-    return list(all_files.values())
-
-
-def answer_question(df: pd.DataFrame, question: str) -> str:
-    """Answer a question about the financial data."""
-    question = question.lower()
-    
-    # Total questions
-    if 'total' in question and 'budget' in question:
-        if 'Budget_Revision' in df.columns:
-            return f"Total Budget Revision: ${df['Budget_Revision'].sum():,.2f}"
-    
-    if 'total' in question and 'business plan' in question:
-        if 'Business_Plan' in df.columns:
-            return f"Total Business Plan: ${df['Business_Plan'].sum():,.2f}"
-    
-    if 'total' in question and 'projection' in question:
-        if 'Projection' in df.columns:
-            return f"Total Projection: ${df['Projection'].sum():,.2f}"
-    
-    if 'total' in question and 'cost' in question:
-        # Find Cost items
-        cost_items = df[df['Item'].astype(str).str.match(r'^2(\.|$)', na=False)]
-        if 'Projection' in cost_items.columns:
-            return f"Total Cost (Projection): ${cost_items['Projection'].sum():,.2f}"
-    
-    # Gross profit
-    if 'gross profit' in question:
-        gp = df[df['Trade'].str.contains('Gross Profit', case=False, na=False)]
-        if not gp.empty:
-            if 'Projection' in gp.columns:
-                return f"Gross Profit: ${gp['Projection'].sum():,.2f}"
-    
-    # Project overhead
-    if 'overhead' in question or 'project overhead' in question:
-        oh = df[df['Trade'].str.contains('Project Overhead', case=False, na=False)]
-        if not oh.empty:
-            if 'Projection' in oh.columns:
-                return f"Project Overhead: ${oh['Projection'].sum():,.2f}"
-    
-    # Fee
-    if 'fee' in question:
-        fee = df[df['Trade'].str.contains('Fee', case=False, na=False)]
-        if not fee.empty:
-            if 'Projection' in fee.columns:
-                return f"Fee: ${fee['Projection'].sum():,.2f}"
-    
-    # Bond
-    if 'bond' in question:
-        bond = df[df['Trade'].str.contains('Bond', case=False, na=False)]
-        if not bond.empty:
-            if 'Projection' in bond.columns:
-                return f"Bond: ${bond['Projection'].sum():,.2f}"
-    
-    # Monthly breakdown
-    if 'april' in question and 'cost' in question:
-        if 'April' in df.columns:
-            return f"April Cost: ${df['April'].sum():,.2f}"
-    
-    if 'may' in question and 'cost' in question:
-        if 'May' in df.columns:
-            return f"May Cost: ${df['May'].sum():,.2f}"
-    
-    # Default response
-    return "I'm not sure about that. Try asking about: Total Budget, Gross Profit, Cost Breakdown, Project Overhead, Fee, Bond, or Monthly Costs."
-
-
-def main():
-    st.set_page_config(
-        page_title="Financial Chatbot 📊",
-        page_icon="📊",
-        layout="centered"
+    return df.pivot_table(
+        index=['Item_Code', 'Trade'], 
+        columns='Financial_Type', 
+        values='Value',
+        aggfunc='sum'
     )
 
-    # Dark blue theme with selected button styling
-    st.markdown("""
-    <style>
-    .stApp {
-        background-color: #0c1929;
-    }
-    .stTitle, .stMarkdown, .stCaption, .stText, p, h1, h2, h3, h4 {
-        color: #e0e6ed !important;
-    }
-    .stSelectbox label, .stButton label {
-        color: #e0e6ed !important;
-    }
-    div[data-testid="stMetricValue"] {
-        color: #4fc3f7 !important;
-    }
-    div[data-testid="stMetricLabel"] {
-        color: #90caf9 !important;
-    }
-    .stSuccess, .stInfo {
-        background-color: #1e3a5f !important;
-        color: #e0e6ed !important;
-    }
-    .stError {
-        background-color: #4a1515 !important;
-        color: #ffcdd2 !important;
-    }
-    button {
-        background-color: #1e4a7a !important;
-        color: #e0e6ed !important;
-        border: 1px solid #2d5a8a !important;
-    }
-    button:hover {
-        background-color: #2d5a8a !important;
-    }
-    /* Selected button styling - white border */
-    button[data-testid="baseButton-primary"][aria-pressed="true"],
-    button[data-testid="baseButton-primary"].stButton > button[aria-pressed="true"] {
-        background-color: #0d3a6e !important;
-        border: 3px solid #ffffff !important;
-        color: #ffffff !important;
-        font-weight: bold !important;
-    }
-    div[data-testid="stExpander"] {
-        background-color: #152238 !important;
-    }
-    input {
-        background-color: #1a2a3a !important;
-        color: #e0e6ed !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+
+# Summary metrics for dashboard
+def get_projected_gross_profit():
+    """
+    Get Projected Gross Profit (before adjustment).
+    Source: Projection sheet, Trade = Gross Profit (Item 3.0-4.3) or Gross Profit (Item 1.0-2.0)
+    """
+    # Query Projection sheet for Gross Profit items
+    proj = query(Sheet_Name='Projection')
+    if proj.empty:
+        return 0.0
     
-    # Initialize session state
-    if 'projects_cache' not in st.session_state:
-        st.session_state.projects_cache = {}
-    if 'selected_project' not in st.session_state:
-        st.session_state.selected_project = None
-    if 'drive_service' not in st.session_state:
-        st.session_state.drive_service = None
-    if 'root_folder_id' not in st.session_state:
-        st.session_state.root_folder_id = None
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
+    # Filter for Gross Profit trades
+    gp_trades = proj[proj['Trade'].str.contains('Gross Profit', case=False, na=False)]
     
-    # Header with Instructions button
-    col_h1, col_h2 = st.columns([1, 0.1])
-    with col_h1:
-        st.title("📊 Financial Chatbot")
-    with col_h2:
-        with st.popover("❓"):
-            st.markdown("""
-            ### How to Use
-            
-            1. **Select Year & Month** from the dropdowns
-            2. **Click "Find Files"** to search Google Drive
-            3. **Select a project** from the list
-            4. **Ask questions** about the financial data!
-            
-            ---
-            
-            ### Expected Folder Structure
-            
-            ```
-            Google Drive/
-            └── Ai Chatbot Knowledge Base/
-                └── 2025/
-                    ├── 01/
-                    │   └── Project Alpha.xlsx
-                    └── 02/
-                        └── Project Beta.xlsx
-            ```
-            """)
+    if gp_trades.empty:
+        return 0.0
     
-    # Auto-connect to Google Drive on load
-    if st.session_state.drive_service is None:
-        with st.spinner("Connecting to Google Drive..."):
-            service = get_drive_service()
-            if service:
-                st.session_state.drive_service = service
-                st.success("Connected to Google Drive!")
-            else:
-                st.warning("Could not connect to Google Drive.")
-                st.info("Check your secrets configuration in Streamlit Cloud settings.")
-    
-    # Check if root folder exists
-    if not st.session_state.root_folder_id:
-        st.warning(f"Root folder '{DRIVE_ROOT_FOLDER_NAME}' not found in Google Drive!")
-        st.info("Please ensure you have shared the folder with the service account.")
-        return
-    
-    # Selection Controls
-    st.markdown("### 📁 Select Project")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        year = st.selectbox("Year", options=["2024", "2025", "2026"], index=1, key="year_select")
-    
-    with col2:
-        months = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"]
-        month_names = {
-            "01": "January", "02": "February", "03": "March",
-            "04": "April", "05": "May", "06": "June",
-            "07": "July", "08": "August", "09": "September",
-            "10": "October", "11": "November", "12": "December"
-        }
-        month = st.selectbox("Month", options=months, format_func=lambda x: month_names[x], key="month_select")
-    
-    # Auto-search when year or month changes
-    search_key = f"{year}-{month}"
-    
-    if search_key != st.session_state.get('last_search'):
-        st.session_state.last_search = search_key
-        st.session_state.projects_found = []
-        st.session_state.selected_project = None
-        if 'project_data' in st.session_state:
-            del st.session_state.project_data
-        if 'project_meta' in st.session_state:
-            del st.session_state.project_meta
-        
-        with st.spinner(f"Searching {month_names[month]} {year}..."):
-            # Find year folder
-            year_folder = list_folders(st.session_state.drive_service, st.session_state.root_folder_id, year)
-            
-            if year_folder:
-                # Find month folder
-                month_folder = list_folders(st.session_state.drive_service, year_folder[0]['id'], month)
-                
-                if month_folder:
-                    # Find Excel files
-                    excel_files = find_excel_files_in_month(st.session_state.drive_service, month_folder[0]['id'])
-                    
-                    if excel_files:
-                        # Parse each file to get project code and name
-                        projects = []
-                        for file in excel_files:
-                            try:
-                                from io import BytesIO
-                                request = st.session_state.drive_service.files().get_media(fileId=file['id'])
-                                file_content = request.execute()
-                                excel_file = BytesIO(file_content)
-                                df = pd.read_excel(excel_file, sheet_name='Financial Status', header=None, nrows=10)
-                                
-                                # Extract project code and name
-                                project_code = str(df.iloc[2, 1]).strip() if pd.notna(df.iloc[2, 1]) else "Unknown"
-                                project_name = str(df.iloc[3, 1]).strip() if pd.notna(df.iloc[3, 1]) else file['name'].replace('.xlsx', '')
-                                
-                                projects.append({
-                                    'file_id': file['id'],
-                                    'file_name': file['name'],
-                                    'code': project_code,
-                                    'name': project_name,
-                                    'year': year,
-                                    'month': month_names[month],
-                                    'month_folder_id': month_folder[0]['id']
-                                })
-                            except Exception as e:
-                                # Fallback to filename
-                                projects.append({
-                                    'file_id': file['id'],
-                                    'file_name': file['name'],
-                                    'code': "Unknown",
-                                    'name': file['name'].replace('.xlsx', ''),
-                                    'year': year,
-                                    'month': month_names[month],
-                                    'month_folder_id': month_folder[0]['id']
-                                })
-                        
-                        # Sort projects by code (number) from small to large
-                        st.session_state.projects_found = sorted(projects, key=lambda x: int(x['code']) if x['code'].isdigit() else float('inf'))
-                else:
-                    st.session_state.projects_found = []
-            else:
-                st.session_state.projects_found = []
-    
-    # Display projects found
-    if st.session_state.get('projects_found'):
-        st.markdown(f"**Found {len(st.session_state.projects_found)} projects:**")
-        
-        # Get selected file_id safely
-        selected = st.session_state.get('selected_project')
-        selected_id = selected.get('file_id') if selected else None
-        
-        # Create cards for each project
-        for i, proj in enumerate(st.session_state.projects_found):
-            is_selected = (selected_id == proj['file_id'])
-            
-            if is_selected:
-                st.markdown(f"""
-                <div style="background-color: #1e4a7a; padding: 15px; border-radius: 10px; margin: 5px 0; border: 2px solid #4fc3f7;">
-                    <strong style="color: #4fc3f7; font-size: 18px;">{proj['code']}</strong>
-                    <span style="color: #e0e6ed; font-size: 16px;"> - {proj['name']}</span>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                if st.button(f"📁 {proj['code']} - {proj['name']}", key=f"project_{i}", use_container_width=True):
-                    st.session_state.selected_project = proj
-                    # Clear old project data
-                    if 'project_data' in st.session_state:
-                        del st.session_state.project_data
-                    if 'project_meta' in st.session_state:
-                        del st.session_state.project_meta
-                    st.rerun()
-    elif st.session_state.get('last_search') and not st.session_state.get('projects_found'):
-        st.info(f"No projects found in {month_names[month]} {year}")
-    
-    # Show selected project data
-    if st.session_state.selected_project:
-        project = st.session_state.selected_project
-        
-        st.markdown("---")
-        st.markdown(f"### 📄 {project['code']} - {project['name']}")
-        st.caption(f"{project['month']} {project['year']}")
-        
-        # Load data if not already loaded
-        if 'project_data' not in st.session_state:
-            with st.spinner("Loading project data..."):
-                df, meta = download_and_parse_excel(
-                    st.session_state.drive_service,
-                    project['file_id'],
-                    project['file_name'],
-                    CACHE_DIR
-                )
-                if df is not None:
-                    st.session_state.project_data = df
-                    st.session_state.project_meta = meta
-                else:
-                    st.error("Failed to load file data")
-        
-        # Display project data
-        if 'project_data' in st.session_state and st.session_state.project_data is not None:
-            df = st.session_state.project_data
-            
-            # Load Financial Status sheet data for high-level summary
-            try:
-                from io import BytesIO
-                request = st.session_state.drive_service.files().get_media(fileId=project['file_id'])
-                file_content = request.execute()
-                excel_file = BytesIO(file_content)
-                
-                # Parse Financial Status sheet
-                df_financial = pd.read_excel(excel_file, sheet_name='Financial Status', header=None)
-                
-                # Debug: Show structure
-                st.write("Debug - Financial Status structure:")
-                for idx in range(10, min(18, len(df_financial))):
-                    col0 = str(df_financial.iloc[idx, 0])[:30] if pd.notna(df_financial.iloc[idx, 0]) else ""
-                    col2 = df_financial.iloc[idx, 2] if pd.notna(df_financial.iloc[idx, 2]) else ""
-                    col3 = df_financial.iloc[idx, 3] if pd.notna(df_financial.iloc[idx, 3]) else ""
-                    col5 = df_financial.iloc[idx, 5] if pd.notna(df_financial.iloc[idx, 5]) else ""
-                    st.write(f"Row {idx}: {col0} | Col2(1st WB)={col2} | Col3(B)={col3} | Col5(D=B+C)={col5}")
-                
-                # Extract the 3 key metrics from Financial Status
-                # Based on the structure:
-                # Column C (2) = 1st Working Budget = Projection
-                # Column D (3) = B = Business Plan / WIP
-                # Column F (5) = D=B+C = Budget Revision / Cash Flow
-                gp_projection = 0
-                gp_wip = 0
-                gp_cash_flow = 0
-                
-                for idx in range(16, min(40, len(df_financial))):
-                    item_name = str(df_financial.iloc[idx, 0]).strip() if pd.notna(df_financial.iloc[idx, 0]) else ""
-                    trade_name = str(df_financial.iloc[idx, 1]).strip() if pd.notna(df_financial.iloc[idx, 1]) else ""
-                    
-                    # Look for Gross Profit items (Trade column contains "Gross Profit")
-                    if 'gross profit' in trade_name.lower():
-                        # Column C = 1st Working Budget (Projection)
-                        col2_val = df_financial.iloc[idx, 2]
-                        gp_projection = float(col2_val) if pd.notna(col2_val) and str(col2_val).replace('.','').isdigit() else 0
-                        
-                        # Column D = B (Business Plan / WIP)
-                        col3_val = df_financial.iloc[idx, 3]
-                        gp_wip = float(col3_val) if pd.notna(col3_val) and str(col3_val).replace('.','').isdigit() else 0
-                        
-                        # Column F = D=B+C (Budget / Cash Flow)
-                        col5_val = df_financial.iloc[idx, 5]
-                        gp_cash_flow = float(col5_val) if pd.notna(col5_val) and str(col5_val).replace('.','').isdigit() else 0
-                        
-                        st.write(f"Debug - Found GP at row {idx}: {item_name} | {trade_name}")
-                        break
-                
-                # Show 3 high-level metrics from Financial Status
-                s1, s2, s3 = st.columns(3)
-                s1.metric("Projected Gross Profit (bf adj)", f"${gp_projection:,.0f}")
-                s2.metric("WIP Gross Profit (bf adj)", f"${gp_wip:,.0f}")
-                s3.metric("Cash Flow", f"${gp_cash_flow:,.0f}")
-                
-            except Exception as e:
-                st.warning(f"Could not load Financial Status summary: {e}")
-            
-            # Data Selection - Two rows of quick filters
-            st.markdown("#### 📊 Quick Data Selection")
-            
-            # Initialize selection state
-            if 'data_category' not in st.session_state:
-                st.session_state.data_category = None
-            if 'data_type' not in st.session_state:
-                st.session_state.data_type = None
-            
-            # Row 1: Category Selection
-            st.markdown("**Category:**")
-            cat_cols = st.columns(6)
-            categories = [
-                ("Budget", "Budget_Revision"),
-                ("Business Plan", "Business_Plan"),
-                ("Audit Report (WIP)", "Audit_Report_WIP"),
-                ("Projection", "Projection"),
-                ("Committed Value", "Commitments"),
-                ("Cash Flow", "Cash_Flow")
-            ]
-            for i, (cat_name, cat_key) in enumerate(categories):
-                with cat_cols[i]:
-                    if st.button(cat_name, key=f"cat_{i}", use_container_width=True):
-                        st.session_state.data_category = cat_key
-                        st.session_state.data_type = None
-                        st.rerun()
-            
-            # Row 2: Type Selection
-            st.markdown("**Type:**")
-            type_cols = st.columns(6)
-            types = [
-                ("Gross Profit (bf adj)", "gp_bf"),
-                ("Gross Profit (after)", "gp_after"),
-                ("Total Income", "income"),
-                ("Total Cost", "cost"),
-                ("VO/CE", "vo_ce"),
-                ("Claims", "claims")
-            ]
-            for i, (type_name, type_key) in enumerate(types):
-                with type_cols[i]:
-                    if st.button(type_name, key=f"type_{i}", use_container_width=True):
-                        st.session_state.data_type = type_key
-                        st.rerun()
-            
-            # Display selected data from Financial Status sheet
-            if st.session_state.data_category and st.session_state.data_type:
-                cat_key = st.session_state.data_category
-                type_key = st.session_state.data_type
-                
-                # Reload Financial Status sheet for breakdown
-                try:
-                    request = st.session_state.drive_service.files().get_media(fileId=project['file_id'])
-                    file_content = request.execute()
-                    excel_file = BytesIO(file_content)
-                    df_status = pd.read_excel(excel_file, sheet_name='Financial Status', header=None)
-                    
-                    # Parse Financial Status data rows (starting from row 17)
-                    data_rows = []
-                    for idx in range(17, len(df_status)):
-                        item_code = df_status.iloc[idx, 0]
-                        if pd.isna(item_code) or str(item_code).strip() == '':
-                            continue
-                        
-                        item_str = str(item_code).strip()
-                        trade = df_status.iloc[idx, 1] if pd.notna(df_status.iloc[idx, 1]) else ''
-                        
-                        # Extract values from 1st Working Budget (col C=2), B (col D=3), D=B+C (col F=5)
-                        try:
-                            budget_val = float(df_status.iloc[idx, 2]) if pd.notna(df_status.iloc[idx, 2]) and str(df_status.iloc[idx, 2]).replace('.','').isdigit() else 0
-                            b_val = float(df_status.iloc[idx, 3]) if pd.notna(df_status.iloc[idx, 3]) and str(df_status.iloc[idx, 3]).replace('.','').isdigit() else 0
-                            d_val = float(df_status.iloc[idx, 5]) if pd.notna(df_status.iloc[idx, 5]) and str(df_status.iloc[idx, 5]).replace('.','').isdigit() else 0
-                        except:
-                            budget_val = 0
-                            b_val = 0
-                            d_val = 0
-                        
-                        row_data = {
-                            'Item': item_str,
-                            'Trade': str(trade).strip(),
-                            '1st_Working_Budget': budget_val,
-                            'B': b_val,
-                            'D_equals_BC': d_val
-                        }
-                        data_rows.append(row_data)
-                    
-                    df_filtered = pd.DataFrame(data_rows)
-                    
-                    # Filter based on type
-                    if type_key == "gp_bf":
-                        # Gross Profit before adjustment - exclude "after adjustment"
-                        filtered = df_filtered[
-                            df_filtered['Trade'].str.contains('Gross Profit', case=False, na=False) & 
-                            ~df_filtered['Trade'].str.contains('after adjustment', case=False, na=False)
-                        ]
-                    elif type_key == "gp_after":
-                        # Gross Profit after adjustment
-                        filtered = df_filtered[
-                            df_filtered['Trade'].str.contains('after adjustment', case=False, na=False)
-                        ]
-                    elif type_key == "income":
-                        filtered = df_filtered[df_filtered['Item'].astype(str).str.match(r'^1(\.|$)', na=False)]
-                    elif type_key == "cost":
-                        filtered = df_filtered[df_filtered['Item'].astype(str).str.match(r'^2(\.|$)', na=False)]
-                    elif type_key == "vo_ce":
-                        filtered = df_filtered[df_filtered['Trade'].str.contains('VO|Compensation|CE', case=False, na=False)]
-                    elif type_key == "claims":
-                        filtered = df_filtered[df_filtered['Trade'].str.contains('Claim', case=False, na=False)]
-                    else:
-                        filtered = df_filtered
-                    
-                    # Get total based on category
-                    # Column C = 1st Working Budget (Projection)
-                    # Column D = B (Business Plan / WIP)
-                    # Column F = D=B+C (Revision / Budget / Cash Flow)
-                    if cat_key == "Budget_Revision":
-                        col_name = 'D_equals_BC'  # D=B+C = Revision as at = Budget
-                    elif cat_key == "Business_Plan":
-                        col_name = 'B'  # B column
-                    elif cat_key == "Audit_Report_WIP":
-                        col_name = 'B'  # B column = WIP
-                    elif cat_key == "Projection":
-                        col_name = '1st_Working_Budget'  # 1st Working Budget
-                    elif cat_key == "Cash_Flow":
-                        col_name = 'D_equals_BC'  # D=B+C = Cash Flow uses same column
-                    else:
-                        col_name = 'D_equals_BC'
-                    
-                    if col_name in filtered.columns:
-                        total = filtered[col_name].sum()
-                        st.success(f"**Total:** ${total:,.2f}")
-                        
-                        # Show breakdown from Financial Status
-                        st.markdown("**Breakdown (Financial Status):**")
-                        display_cols = ['Item', 'Trade', col_name]
-                        st.dataframe(filtered[display_cols].sort_values(by=col_name, ascending=False), use_container_width=True)
-                    
-                except Exception as e:
-                    st.error(f"Error loading Financial Status data: {e}")
-            
-            # Data toggle
-            with st.expander("📊 View Raw Data"):
-                st.dataframe(df, use_container_width=True)
+    # Sum all Gross Profit values from Projection
+    return gp_trades['Value'].sum()
 
 
+def get_wip_gross_profit():
+    """
+    Get WIP Gross Profit (before adjustment).
+    Source: Financial Status sheet, Financial_Type = Audit Report (WIP) J, Trade = Gross Profit
+    """
+    # Query Audit Report (WIP) J for Gross Profit items
+    wip = query(Sheet_Name='Financial Status', Financial_Type='Audit Report (WIP) J')
+    if wip.empty:
+        return 0.0
+    
+    # Filter for Gross Profit trades
+    gp_trades = wip[wip['Trade'].str.contains('Gross Profit', case=False, na=False)]
+    
+    if gp_trades.empty:
+        return 0.0
+    
+    # Sum all Gross Profit values from Audit Report (WIP)
+    return gp_trades['Value'].sum()
+
+
+def get_cash_flow():
+    """
+    Get Cash Flow amount (Gross Profit related).
+    Source: Cash Flow sheet, Trade = Gross Profit
+    """
+    # Query Cash Flow sheet for Gross Profit items
+    cf = query(Sheet_Name='Cash Flow')
+    if cf.empty:
+        return 0.0
+    
+    # Filter for Gross Profit trades
+    gp_trades = cf[cf['Trade'].str.contains('Gross Profit', case=False, na=False)]
+    
+    if gp_trades.empty:
+        return 0.0
+    
+    # Sum all Gross Profit values from Cash Flow
+    return gp_trades['Value'].sum()
+
+
+def get_financial_summary():
+    """
+    Get all three key financial metrics.
+    Returns dict with Projected GP, WIP GP, and Cash Flow.
+    """
+    return {
+        'projected_gross_profit': get_projected_gross_profit(),
+        'wip_gross_profit': get_wip_gross_profit(),
+        'cash_flow': get_cash_flow()
+    }
+
+
+# Initialize on import (optional - can be disabled if needed)
+# initialize()
+
+
+# Test module
 if __name__ == "__main__":
-    main()
+    print("=== Financial Chatbot Test ===\n")
+    
+    # Initialize
+    initialize(force_reprocess=False)
+    
+    print(f"\nAvailable years: {list_available_years()}")
+    print(f"Available sheets: {list_available_sheets()}")
+    print(f"Available months: {list_available_months()}")
+    
+    print(f"\n=== Projection by Month (Item 1.1) ===")
+    print(show_projection_by_month('1.1'))
+    
+    print(f"\n=== Financial Status Summary ===")
+    print(show_financial_status_summary().head(10))
