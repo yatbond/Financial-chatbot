@@ -69,7 +69,7 @@ if 'folders_with_data' not in st.session_state:
 if 'project_list' not in st.session_state:
     st.session_state.project_list = {}  # Just file names, no data
 if 'query_knowledge_base' not in st.session_state:
-    st.session_state.query_knowledge_base = load_knowledge_base()
+    st.session_state.query_knowledge_base = {}  # Global preference, session-only
 
 def get_drive_service():
     """Get Google Drive service."""
@@ -292,15 +292,16 @@ def find_best_matches(df, search_text, project):
     elif 'gross profit' in search_lower:
         target_item_code = '3'
     
-    # Check if Roll column exists
-    has_roll = 'Roll' in project_df.columns
+    # Check for Roll column (try multiple common names)
+    roll_columns = ['Roll', 'Roll No', 'RollNo', 'Row', 'Row No', 'row']
+    roll_col = next((c for c in roll_columns if c in project_df.columns), None)
 
     agg_dict = {
         'Value': 'sum',
         'Month': 'first',
     }
-    if has_roll:
-        agg_dict['Roll'] = 'min'  # Get the minimum roll number for this group
+    if roll_col:
+        agg_dict[roll_col] = 'min'
 
     all_combinations = project_df.groupby(['Financial_Type', 'Data_Type', 'Item_Code']).agg(agg_dict).reset_index()
 
@@ -348,7 +349,7 @@ def find_best_matches(df, search_text, project):
         if target_item_code and item_code == target_item_code:
             score += 5
         
-        # Knowledge base boost
+        # Knowledge base boost - GLOBAL across all projects
         if st.session_state.query_knowledge_base:
             normalized_q = search_lower.strip()
             if normalized_q in st.session_state.query_knowledge_base:
@@ -356,7 +357,7 @@ def find_best_matches(df, search_text, project):
                 if (saved.get('Financial_Type') == row['Financial_Type'] and
                     saved.get('Data_Type') == row['Data_Type'] and
                     saved.get('Item_Code') == item_code):
-                    score += 100
+                    score += 200  # Higher boost for user preference
         
         if total_query_words > 0:
             words_found = sum(1 for w in search_words if len(w) >= 2 and (w in ft or w in dt))
@@ -374,8 +375,8 @@ def find_best_matches(df, search_text, project):
                 'score': score,
                 'matched_count': matched_count
             }
-            if has_roll:
-                match_data['Roll'] = row['Roll']
+            if roll_col:
+                match_data['Roll'] = row[roll_col]
             matches.append(match_data)
     
     matches.sort(key=lambda x: (x['score'], x['matched_count']), reverse=True)
@@ -597,12 +598,16 @@ if st.session_state.data_loaded and st.session_state.df is not None:
                     response, _ = answer_question(df, project, st.session_state.pending_question, selected_filters=match)
                     if response:
                         st.session_state.chat_history.append({
-                            "q": st.session_state.pending_question, 
+                            "q": st.session_state.pending_question,
                             "a": response
                         })
-                        normalized_q = st.session_state.pending_question.lower().strip()
-                        st.session_state.query_knowledge_base[normalized_q] = match
-                        save_knowledge_base(st.session_state.query_knowledge_base)
+                        # Save with expanded acronyms for global priority
+                        expanded_q = expand_acronyms(st.session_state.pending_question).lower().strip()
+                        # Save both original and expanded versions
+                        original_q = st.session_state.pending_question.lower().strip()
+                        st.session_state.query_knowledge_base[original_q] = match
+                        if expanded_q != original_q:
+                            st.session_state.query_knowledge_base[expanded_q] = match
                         st.session_state.pending_question = None
                         st.session_state.pending_matches = []
                         st.rerun()
@@ -626,7 +631,7 @@ if st.session_state.data_loaded and st.session_state.df is not None:
     
     if st.button("Reset Preferences"):
         st.session_state.query_knowledge_base = {}
-        save_knowledge_base({})
+        st.success("Preferences reset!")
         st.rerun()
     
     if st.button("Change Project"):
