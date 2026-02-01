@@ -1,11 +1,11 @@
 """
 Financial Chatbot - Streamlit Web App
 Accesses Google Drive via API for financial data
-DEBUG VERSION - Shows all files/folders found
 """
 import streamlit as st
 import pandas as pd
 import json
+from io import BytesIO
 
 st.set_page_config(page_title="Financial Chatbot", page_icon="📊")
 
@@ -16,8 +16,8 @@ if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
 if 'df' not in st.session_state:
     st.session_state.df = None
-if 'debug_info' not in st.session_state:
-    st.session_state.debug_info = ""
+if 'loaded_files' not in st.session_state:
+    st.session_state.loaded_files = []
 
 def get_drive_service():
     """Get Google Drive service."""
@@ -28,7 +28,6 @@ def get_drive_service():
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
         
-        # Load credentials
         creds = None
         if 'google_credentials' in st.secrets:
             creds = st.secrets['google_credentials']
@@ -45,54 +44,8 @@ def get_drive_service():
         st.session_state.service = build('drive', 'v3', credentials=credentials)
         return st.session_state.service
     except Exception as e:
-        st.write(f"Error creating service: {e}")
+        st.write(f"Error: {e}")
         return None
-
-def debug_list_all_files():
-    """List all files - for debugging."""
-    service = get_drive_service()
-    if service is None:
-        return "No service"
-    
-    debug = []
-    
-    # List ALL folders in root
-    debug.append("=== Folders in My Drive root ===")
-    results = service.files().list(
-        q="mimeType='application/vnd.google-apps.folder' and trashed=false",
-        fields="files(id, name)",
-        pageSize=50
-    ).execute()
-    
-    folders = results.get('files', [])
-    for f in folders:
-        debug.append(f"- {f['name']} ({f['id']})")
-    
-    # List files named similarly
-    debug.append("\n=== Files with 'Financial' in name ===")
-    results = service.files().list(
-        q="name contains 'Financial' and trashed=false",
-        fields="files(id, name)",
-        pageSize=20
-    ).execute()
-    
-    files = results.get('files', [])
-    for f in files:
-        debug.append(f"- {f['name']} ({f['id']})")
-    
-    # List files with 'Report' in name
-    debug.append("\n=== Files with 'Report' in name ===")
-    results = service.files().list(
-        q="name contains 'Report' and trashed=false",
-        fields="files(id, name)",
-        pageSize=20
-    ).execute()
-    
-    files = results.get('files', [])
-    for f in files:
-        debug.append(f"- {f['name']} ({f['id']})")
-    
-    return "\n".join(debug)
 
 def find_and_load_data():
     """Find and load data."""
@@ -100,23 +53,46 @@ def find_and_load_data():
     if service is None:
         return None, "No service"
     
-    # Try multiple search approaches
+    # Search for Excel files (.xlsx) - NOT Google Sheets
     all_files = []
     
-    # Approach 1: Search by name containing "Financial Report"
-    for query_term in ["Financial Report", "Financial", "Report"]:
-        results = service.files().list(
-            q=f"name contains '{query_term}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
-            fields="files(id, name)",
-            pageSize=50
-        ).execute()
-        
-        files = results.get('files', [])
-        for f in files:
-            if f['id'] not in [x['id'] for x in all_files]:
-                all_files.append(f)
+    # Search by name containing "Financial Report" and ending with .xlsx
+    results = service.files().list(
+        q="name contains 'Financial Report' and name endsWith '.xlsx' and trashed=false",
+        fields="files(id, name)",
+        pageSize=50
+    ).execute()
+    
+    files = results.get('files', [])
+    for f in files:
+        all_files.append(f)
     
     return all_files, len(all_files)
+
+def load_excel_from_gdrive(file_id, file_name):
+    """Load a single Excel file from Google Drive."""
+    service = get_drive_service()
+    if service is None:
+        return None
+    
+    # Export as Excel format
+    request = service.files().export_media(
+        fileId=file_id,
+        mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    content = request.execute()
+    
+    # Parse all sheets
+    excel_file = pd.ExcelFile(BytesIO(content))
+    all_sheets = {}
+    
+    for sheet_name in excel_file.sheet_names:
+        df = pd.read_excel(excel_file, sheet_name=sheet_name)
+        df['_source_file'] = file_name
+        df['_source_sheet'] = sheet_name
+        all_sheets[sheet_name] = df
+    
+    return all_sheets
 
 # Load credentials and test connection
 service = get_drive_service()
@@ -129,36 +105,88 @@ if service is None:
 else:
     st.success("Connected to Google Drive ✓")
 
-# Debug button
-if st.button("Show Debug Info (What files are accessible?)"):
-    with st.spinner("Fetching file list..."):
-        debug_output = debug_list_all_files()
-        st.session_state.debug_info = debug_output
-
-# Show debug info if available
-if st.session_state.debug_info:
-    st.markdown("### 🔍 Debug Info")
-    st.text(st.session_state.debug_info)
-
 # Load data button
 if st.button("Load Financial Data"):
     with st.spinner("Searching for files..."):
         files, count = find_and_load_data()
         
         if count == 0:
-            st.error(f"No Excel files found! Files found: {count}")
-            st.info("Try sharing a specific file with the service account email.")
+            st.error("No Excel files found!")
         else:
-            st.success(f"Found {count} files!")
-            st.write("Files found:", [f['name'] for f in files])
+            st.success(f"Found {count} Excel files!")
             
-            # Show first file ID for sharing check
-            if files:
-                st.code(f"First file ID: {files[0]['id']}")
-                st.info(f"Service account email: financial-chatbot@chatbot-485614.iam.gserviceaccount.com")
-                st.info("Make sure this email has access to the files!")
+            all_dfs = []
+            
+            with st.spinner(f"Loading {count} files..."):
+                progress_bar = st.progress(0)
+                
+                for i, f in enumerate(files):
+                    try:
+                        sheets = load_excel_from_gdrive(f['id'], f['name'])
+                        for sheet_name, df in sheets.items():
+                            df['_source_file'] = f['name']
+                            df['_source_sheet'] = sheet_name
+                            all_dfs.append(df)
+                        
+                        st.session_state.loaded_files.append(f['name'])
+                    except Exception as e:
+                        st.write(f"Error loading {f['name']}: {e}")
+                    
+                    progress_bar.progress((i + 1) / count)
+            
+            if all_dfs:
+                combined = pd.concat(all_dfs, ignore_index=True)
+                st.session_state.df = combined
+                st.session_state.data_loaded = True
+                st.success(f"Loaded {len(combined)} records from {len(files)} files!")
+                st.rerun()
+            else:
+                st.error("No data could be parsed")
 
-# Show debug info toggle
-with st.expander("Service Account Info"):
-    st.write("Email: financial-chatbot@chatbot-485614.iam.gserviceaccount.com")
-    st.write("Permissions needed: Drive read access to shared folder")
+# Show loaded data
+if st.session_state.data_loaded and st.session_state.df is not None:
+    df = st.session_state.df
+    st.success(f"Data loaded: {len(df)} records from {len(st.session_state.loaded_files)} files")
+    
+    # Show files loaded
+    st.markdown("### 📁 Files Loaded")
+    for f in st.session_state.loaded_files:
+        st.write(f"✓ {f}")
+    
+    # Show summary
+    st.markdown("### 📈 Data Summary")
+    
+    # Try to show useful columns
+    for col in ['_source_sheet', 'Year', 'Month', 'Sheet_Name']:
+        if col in df.columns:
+            unique_vals = df[col].unique()
+            if len(unique_vals) <= 20:
+                st.write(f"{col}: {list(unique_vals)}")
+    
+    # Show sample
+    with st.expander("Sample Data", expanded=False):
+        st.dataframe(df.head(10))
+    
+    # Download button
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        "Download Data as CSV",
+        csv,
+        "financial_data.csv",
+        "text/csv",
+        key='download-csv'
+    )
+
+# Show loaded files
+if st.session_state.loaded_files:
+    with st.expander("Loaded Files"):
+        for f in st.session_state.loaded_files:
+            st.write(f"✓ {f}")
+
+# Clear data button
+if st.session_state.data_loaded:
+    if st.button("Clear Data"):
+        st.session_state.data_loaded = False
+        st.session_state.df = None
+        st.session_state.loaded_files = []
+        st.rerun()
