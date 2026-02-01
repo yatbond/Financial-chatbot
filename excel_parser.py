@@ -44,6 +44,17 @@ FORMULA_INDICATOR_PATTERNS = [
 ]
 
 
+def clean_text_value(val):
+    """Remove '=' prefix from formula cells that show as text."""
+    if pd.isna(val):
+        return ""
+    text = str(val).strip()
+    # Remove leading '=' if present (Excel formula display)
+    if text.startswith('='):
+        text = text[1:]
+    return text
+
+
 def is_formula_indicator(text):
     """Check if text is a formula indicator that should be ignored."""
     if not text:
@@ -122,7 +133,7 @@ def parse_financial_status_sheet(xl, year=None, month=None):
     # Parse data rows (starting from row 15)
     for row_idx in range(15, len(df)):
         item_code = get_merged_header_value(df, row_idx, 0)  # Column A
-        data_type = get_merged_header_value(df, row_idx, 1)  # Column B (was Trade, now Data_Type)
+        data_type = clean_text_value(df.iloc[row_idx, 1])  # Column B (was Trade, now Data_Type)
         
         # Skip empty rows or header rows
         if not item_code or item_code in ['Item', '(HK$']:
@@ -197,7 +208,7 @@ def parse_other_sheet(xl, sheet_name, base_year=None):
     # Parse data rows (starting from row 12)
     for row_idx in range(12, len(df)):
         item_code = get_merged_header_value(df, row_idx, 0)  # Column A
-        data_type = get_merged_header_value(df, row_idx, 1)  # Column B (was Trade, now Data_Type)
+        data_type = clean_text_value(df.iloc[row_idx, 1])  # Column B (was Trade, now Data_Type)
         
         # Skip empty rows or header rows
         if not item_code or item_code in ['Item', '(HK$']:
