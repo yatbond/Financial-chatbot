@@ -121,8 +121,8 @@ def preprocess_folder(root_folder, force=False):
             print(f"[ERR] Error processing {excel_path}: {e}")
     
     # Save index
-    index_path = os.path.join(root_folder, METADATA_FILE)
-    with open(index_path, 'w') as f:
+    index_path = os.path.normpath(os.path.join(root_folder, METADATA_FILE))
+    with open(index_path, 'w', encoding='utf-8') as f:
         json.dump(index, f, indent=2)
     print(f"\n[OK] Index saved: {index_path}")
     
@@ -140,7 +140,7 @@ def load_all_data(root_folder):
         print("Returning empty dataset. Please configure the data path.")
         return pd.DataFrame()
     
-    index_path = os.path.join(root_folder, METADATA_FILE)
+    index_path = os.path.normpath(os.path.join(root_folder, METADATA_FILE))
     
     if not os.path.exists(index_path):
         print("No index found. Preprocessing...")
