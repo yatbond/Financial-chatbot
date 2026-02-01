@@ -294,11 +294,12 @@ def find_best_matches(df, search_text, project):
     
     all_combinations = project_df.groupby(['Financial_Type', 'Data_Type', 'Item_Code']).agg({
         'Value': 'sum',
-        'Month': 'first'
+        'Month': 'first',
+        'Roll': 'min'  # Get the minimum roll number for this group
     }).reset_index()
-    
+
     matches = []
-    
+
     for _, row in all_combinations.iterrows():
         ft = str(row['Financial_Type']).lower()
         dt = str(row['Data_Type']).lower()
@@ -364,6 +365,7 @@ def find_best_matches(df, search_text, project):
                 'Value': value,
                 'Month': month,
                 'Item_Code': item_code,
+                'Roll': row['Roll'],
                 'score': score,
                 'matched_count': matched_count
             })
@@ -575,7 +577,8 @@ if st.session_state.data_loaded and st.session_state.df is not None:
         
         for i, match in enumerate(st.session_state.pending_matches[:10]):
             col1, col2 = st.columns([4, 1])
-            match_label = f"Financial Status → {match['Financial_Type']} → {match['Data_Type']} → Item:{match['Item_Code']} → {selected_year}/{match['Month']} → ${match['Value']:,.0f}"
+            roll_num = match.get('Roll', '?')
+            match_label = f"Financial Status → {match['Financial_Type']} → {match['Data_Type']} → Item:{match['Item_Code']} → {selected_year}/{match['Month']} → ${match['Value']:,.0f} (roll {roll_num})"
             with col1:
                 st.write(f"{i+1}. {match_label}")
             with col2:
