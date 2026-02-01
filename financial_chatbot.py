@@ -27,6 +27,8 @@ if 'available_years' not in st.session_state:
     st.session_state.available_years = []
 if 'available_months' not in st.session_state:
     st.session_state.available_months = []
+if 'query_knowledge_base' not in st.session_state:
+    st.session_state.query_knowledge_base = {}  # Maps query -> best match filters
 
 def get_drive_service():
     """Get Google Drive service."""
@@ -245,104 +247,92 @@ def get_project_metrics(df, project):
     return metrics
 
 
-def find_best_match(df, search_text):
+def find_best_matches(df, search_text, project):
     """
-    Find the best matching Financial_Type or Data_Type based on search text.
-    Prioritizes exact matches and key financial terms.
-    Returns (matched_column, matched_value, matched_df)
+    Find all possible matches for a query by combining Financial_Type and Data_Type.
+    Returns list of matches sorted by relevance.
     """
+    project_df = df[df['_project'] == project]
     search_lower = search_text.lower()
+    search_words = search_lower.split()
     
-    # Key financial term mappings (user input -> expected terms)
-    term_mappings = {
-        'net profit': ['net profit', 'net income', 'net loss'],
-        'gross profit': ['gross profit'],
-        'revenue': ['revenue', 'income', 'sales'],
-        'cost': ['cost', 'expense'],
-        'profit': ['profit', 'income'],
-        'tender': ['tender'],
-        'budget': ['budget'],
-        'projection': ['projection'],
-        'wip': ['work in progress', 'wip'],
-        'audit': ['audit'],
-        'committed': ['committed'],
-        'accrual': ['accrual'],
-        'cash flow': ['cash flow'],
-    }
+    # Determine Item_Code based on query
+    item_code = '3'
+    if 'net profit' in search_lower or 'net loss' in search_lower:
+        item_code = '7'
+    elif 'after adjustment' in search_lower or 'adjusted' in search_lower:
+        item_code = '5'
     
-    # Get unique values from Financial_Type and Data_Type
-    financial_types = df['Financial_Type'].dropna().unique().tolist()
-    data_types = df['Data_Type'].dropna().unique().tolist()
+    # Filter by Item_Code first
+    filtered_df = project_df[project_df['Item_Code'] == item_code]
     
-    all_values = []
+    # Get unique combinations
+    combinations = filtered_df.groupby(['Financial_Type', 'Data_Type']).agg({
+        'Value': 'sum',
+        'Month': 'first'
+    }).reset_index()
     
-    # Process Financial_Type values
-    for ft in financial_types:
-        ft_lower = ft.lower()
+    matches = []
+    
+    for _, row in combinations.iterrows():
+        ft = str(row['Financial_Type']).lower()
+        dt = str(row['Data_Type']).lower()
+        value = row['Value']
+        month = row['Month']
+        
         score = 0
         
-        # Direct substring match
-        if search_lower in ft_lower:
-            score += 10
+        # Score based on word matches
+        for word in search_words:
+            if len(word) < 2:
+                continue
+            
+            # Check Financial_Type
+            if word in ft:
+                score += 10
+            
+            # Check Data_Type
+            if word in dt:
+                score += 10
+            
+            # Bonus for exact term matches
+            if 'projection' in search_lower and 'projection' in ft:
+                score += 20
+            if 'budget' in search_lower and 'budget' in ft:
+                score += 20
+            if 'audit' in search_lower and 'audit' in ft:
+                score += 20
+            if 'business plan' in search_lower and 'business plan' in ft:
+                score += 20
+            if 'cash flow' in search_lower and 'cash flow' in ft:
+                score += 20
+            
+            if 'gross profit' in search_lower and 'gross profit' in dt:
+                score += 20
+            if 'net profit' in search_lower and 'net profit' in dt:
+                score += 20
+            if 'income' in search_lower and 'income' in dt:
+                score += 20
+            if 'cost' in search_lower and 'cost' in dt:
+                score += 20
         
-        # Check key term mappings
-        for term_key, expected_terms in term_mappings.items():
-            if term_key in search_lower:
-                for expected in expected_terms:
-                    if expected in ft_lower:
-                        score += 20  # High score for key terms
-                        break
-        
-        # Word-by-word matching
-        search_words = set(search_lower.split())
-        ft_words = set(ft_lower.split())
-        score += len(search_words & ft_words) * 5
-        
-        # Penalize if matched column was not what user likely intended
-        if 'financial' in search_lower or 'type' in search_lower:
-            score += 10  # Boost Financial_Type if user asks for financial type
-        
-        all_values.append({'value': ft, 'column': 'Financial_Type', 'score': score})
+        if score > 0:
+            matches.append({
+                'Financial_Type': row['Financial_Type'],
+                'Data_Type': row['Data_Type'],
+                'Value': value,
+                'Month': month,
+                'Item_Code': item_code,
+                'score': score
+            })
     
-    # Process Data_Type values
-    for dt in data_types:
-        dt_lower = dt.lower()
-        score = 0
-        
-        # Direct substring match
-        if search_lower in dt_lower:
-            score += 10
-        
-        # Check key term mappings
-        for term_key, expected_terms in term_mappings.items():
-            if term_key in search_lower:
-                for expected in expected_terms:
-                    if expected in dt_lower:
-                        score += 20  # High score for key terms
-                        break
-        
-        # Word-by-word matching
-        search_words = set(search_lower.split())
-        dt_words = set(dt_lower.split())
-        score += len(search_words & dt_words) * 5
-        
-        # Penalize if matched column was not what user likely intended
-        if 'data' in search_lower or 'type' in search_lower:
-            score += 10  # Boost Data_Type if user asks for data type
-        
-        all_values.append({'value': dt, 'column': 'Data_Type', 'score': score})
+    # Sort by score descending
+    matches.sort(key=lambda x: x['score'], reverse=True)
     
-    # Sort by score descending and return best match
-    all_values.sort(key=lambda x: x['score'], reverse=True)
-    
-    if all_values and all_values[0]['score'] > 0:
-        best = all_values[0]
-        return best['column'], best['value']
-    
-    return None, None
+    return matches
 
 
-def answer_question(df, project, question):
+def answer_question(df, project, question, selected_filters=None):
     """Answer a user question about the project data."""
     project_df = df[df['_project'] == project]
     question_lower = question.lower()
@@ -370,44 +360,39 @@ def answer_question(df, project, question):
     year_match = re.search(r'202[0-9]', question)
     target_year = project_df['_year'].iloc[0] if year_match is None else int(year_match.group())
     
-    # Determine Item_Code: default to '3' (before adjustment) unless specified
-    item_code = '3'
-    if 'after adjustment' in question_lower or 'adjusted' in question_lower:
-        item_code = '5'  # After adjustment
+    # If user selected specific filters, use them
+    if selected_filters:
+        ft_match = selected_filters.get('Financial_Type')
+        dt_match = selected_filters.get('Data_Type')
+        item_code = selected_filters.get('Item_Code', '3')
+    else:
+        # Find best matches
+        matches = find_best_matches(df, question, project)
+        
+        if not matches:
+            return None, matches  # No matches found
+        
+        if len(matches) == 1:
+            # Single match - use it
+            ft_match = matches[0]['Financial_Type']
+            dt_match = matches[0]['Data_Type']
+            item_code = matches[0]['Item_Code']
+        else:
+            # Multiple matches - return them for user selection
+            return None, matches
     
-    # Special handling for "Net Profit" - it exists in Item_Code='7', not '3'
-    if 'net profit' in question_lower or 'net loss' in question_lower:
-        item_code = '7'  # Use Item_Code=7 directly for Net Profit queries
+    # Apply filters to get data
+    result_df = project_df[
+        (project_df['Financial_Type'] == ft_match) &
+        (project_df['Data_Type'] == dt_match) &
+        (project_df['Item_Code'] == item_code) &
+        (project_df['Month'] == target_month)
+    ]
     
-    # Use fuzzy search to find BOTH Financial_Type and Data_Type matches
-    ft_match = find_best_match_in_column(project_df, question, 'Financial_Type')
-    dt_match = find_best_match_in_column(project_df, question, 'Data_Type')
-    
-    # Build filter
-    filters = {
-        'Sheet_Name': 'Financial Status',
-        'Month': target_month,
-        'Item_Code': item_code,
-    }
-    
-    if ft_match:
-        filters['Financial_Type'] = ft_match
-    
-    if dt_match:
-        filters['Data_Type'] = dt_match
-    
-    # Apply filters
-    result_df = project_df.copy()
-    for col, val in filters.items():
-        result_df = result_df[result_df[col] == val]
-    
-    # Generate response
     if result_df.empty:
-        return f"No data found for '{ft_match or dt_match or question}' with Item Code {item_code}."
+        return f"No data found for '{ft_match} - {dt_match}'", []
     
     total_value = result_df['Value'].sum()
-    
-    # Get details from first record for reference
     first_record = result_df.iloc[0]
     
     response = f"## ${total_value:,.0f} ('000)\n\n"
@@ -419,62 +404,7 @@ def answer_question(df, project, question):
     response += f"**Data Type:** {first_record['Data_Type']}\n"
     response += f"\n*Records found: {len(result_df)}*"
     
-    return response
-
-
-def find_best_match_in_column(df, search_text, column_name):
-    """
-    Find the best matching value in a specific column using fuzzy search.
-    Prioritizes specific term matches over common terms.
-    Returns the best matching value or None.
-    """
-    search_lower = search_text.lower()
-    unique_values = df[column_name].dropna().unique().tolist()
-    
-    best_match = None
-    best_score = 0
-    
-    for value in unique_values:
-        value_lower = str(value).lower()
-        score = 0
-        
-        # Direct substring match (high priority)
-        if search_lower in value_lower:
-            score += 100
-        
-        # Check for specific term matches (higher priority)
-        search_words = search_lower.split()
-        value_words = value_lower.split()
-        
-        # Count matching words
-        matched_words = 0
-        for word in search_words:
-            if word in value_words and len(word) > 2:
-                matched_words += 1
-        
-        # Word match bonus (moderate priority)
-        score += matched_words * 10
-        
-        # Bonus if BOTH "net" AND "profit" are found (for "Net Profit" queries)
-        if 'net' in search_words and 'profit' in search_words:
-            if 'net' in value_words and 'profit' in value_words:
-                score += 50  # Major bonus for "Net Profit" match
-        
-        # Penalty for common/generic terms
-        # "Gross Profit" is very common, so it shouldn't automatically win
-        if 'gross' in value_lower and 'profit' in value_lower:
-            # Check if user specifically asked for "net profit"
-            if 'net' not in search_lower:
-                score -= 5  # Small penalty for generic "gross profit"
-        
-        if score > best_score:
-            best_score = score
-            best_match = value
-    
-    # Only return if score is meaningful (> 0)
-    if best_match and best_score > 0:
-        return best_match
-    return None
+    return response, []
 
 
 # Load credentials
@@ -506,13 +436,11 @@ if st.session_state.available_years:
         selected_year = st.selectbox("Year:", st.session_state.available_years)
     
     with col2:
-        # Get months for selected year
         available_months = st.session_state.year_months.get(selected_year, [])
         if not available_months:
             available_months = st.session_state.available_months
         selected_month = st.selectbox("Month:", sorted(available_months))
     
-    # Load data button
     if st.button("Load Data"):
         with st.spinner(f"Loading data for {selected_month} {selected_year}..."):
             df, projects = load_csv_files_for_period(service, selected_year, selected_month)
@@ -536,17 +464,14 @@ if st.session_state.data_loaded and st.session_state.projects:
     
     st.markdown(f"### 🏗️ Select Project ({st.session_state.current_month} {st.session_state.current_year})")
     
-    # Create project options
     project_options = ["-- Select a project --"] + sorted(projects.keys())
     selected = st.selectbox("Choose a project:", project_options)
     
-    # Update selected project
     if selected != "-- Select a project --":
         st.session_state.selected_project = selected
     elif st.session_state.selected_project:
         selected = st.session_state.selected_project
     
-    # Show project info
     if st.session_state.selected_project:
         project = st.session_state.selected_project
         info = projects[project]
@@ -577,14 +502,56 @@ if st.session_state.data_loaded and st.session_state.projects:
         st.markdown("### 💬 Ask about this Project ('000)")
         st.markdown("*Ask about financial data. I'll find the best match from Financial_Type or Data_Type.*")
         
-        # Chat input
         with st.form("chat_form"):
             user_question = st.text_input("Your question:", placeholder="e.g., What is the Gross Profit?")
             submitted = st.form_submit_button("Ask")
             
             if submitted and user_question:
-                answer = answer_question(st.session_state.df, project, user_question)
-                st.session_state.chat_history.append({"q": user_question, "a": answer})
+                response, matches = answer_question(st.session_state.df, project, user_question)
+                
+                if response is None and matches:
+                    # Multiple matches - show selection UI
+                    st.session_state.pending_question = user_question
+                    st.session_state.pending_matches = matches
+                elif response:
+                    st.session_state.chat_history.append({"q": user_question, "a": response})
+                    st.session_state.pending_question = None
+                    st.session_state.pending_matches = []
+        
+        # Show match selection if needed
+        if hasattr(st.session_state, 'pending_question') and st.session_state.pending_matches:
+            st.markdown("---")
+            st.markdown(f"**Q:** {st.session_state.pending_question}")
+            st.markdown("*Multiple matches found. Please select:*")
+            
+            for i, match in enumerate(st.session_state.pending_matches[:5]):  # Show top 5
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"• {match['Financial_Type']} → {match['Data_Type']}")
+                with col2:
+                    if st.button(f"Select", key=f"select_{i}"):
+                        response, _ = answer_question(
+                            st.session_state.df, 
+                            project, 
+                            st.session_state.pending_question,
+                            selected_filters=match
+                        )
+                        if response:
+                            st.session_state.chat_history.append({
+                                "q": st.session_state.pending_question, 
+                                "a": response
+                            })
+                            # Save to knowledge base
+                            st.session_state.query_knowledge_base[st.session_state.pending_question] = match
+                            st.session_state.pending_question = None
+                            st.session_state.pending_matches = []
+                            st.rerun()
+            
+            # Clear selection
+            if st.button("Clear Selection"):
+                st.session_state.pending_question = None
+                st.session_state.pending_matches = []
+                st.rerun()
         
         # Show chat history
         if st.session_state.chat_history:
@@ -594,19 +561,16 @@ if st.session_state.data_loaded and st.session_state.projects:
                 st.markdown(chat['a'])
                 st.markdown("---")
         
-        # Clear chat button
         if st.button("Clear Chat"):
             st.session_state.chat_history = []
             st.rerun()
         
-        # Show data summary
         with st.expander("📊 Project Data Summary", expanded=False):
             project_df = st.session_state.df[st.session_state.df['_project'] == project]
             st.write(f"Total records: {len(project_df)}")
             st.write(f"Sheets: {project_df['Sheet_Name'].unique().tolist()}")
             st.write(f"Financial Types: {project_df['Financial_Type'].unique().tolist()}")
         
-        # Show sample data
         with st.expander("📋 Sample Data", expanded=False):
             st.dataframe(project_df.head(5))
 
