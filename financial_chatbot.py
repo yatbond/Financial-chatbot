@@ -338,15 +338,16 @@ def find_best_matches(df, search_text, project):
     roll_columns = ['Roll', 'Roll No', 'RollNo', 'Row', 'Row No', 'row']
     roll_col = next((c for c in roll_columns if c in project_df.columns), None)
 
+    # Group by Sheet_Name, Financial_Type, Data_Type, Item_Code AND Month
+    # This gives us individual month values, not summed totals
     agg_dict = {
         'Value': 'sum',
-        'Month': 'first',
     }
     if roll_col:
         agg_dict[roll_col] = 'min'
 
-    # Group by Sheet_Name as well to preserve the actual sheet name
-    all_combinations = project_df.groupby(['Sheet_Name', 'Financial_Type', 'Data_Type', 'Item_Code']).agg(agg_dict).reset_index()
+    # Group by everything including Month to get per-month values
+    all_combinations = project_df.groupby(['Sheet_Name', 'Financial_Type', 'Data_Type', 'Item_Code', 'Month']).agg(agg_dict).reset_index()
 
     matches = []
 
