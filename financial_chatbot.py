@@ -478,6 +478,8 @@ def handle_monthly_category(df, project, question):
             category_name = kw
             break
 
+    print(f"DEBUG: is_monthly_query={is_monthly_query}, category_prefix={category_prefix}, category_name={category_name}, question_lower={question_lower}")
+
     if not is_monthly_query or not category_prefix:
         return None
 
@@ -517,13 +519,15 @@ def handle_monthly_category(df, project, question):
         total = 0
         for _, row in filtered.iterrows():
             item_code = str(row['Item_Code'])
-            if item_code.startswith(category_prefix):
+            # Check if item_code starts with category_prefix (e.g., "2.2" matches "2.2.1")
+            if item_code.startswith(category_prefix + '.') or item_code == category_prefix:
                 total += row['Value']
 
-        if total != 0:
-            results[ft] = total
+        # Always include all financial types (even if 0)
+        results[ft] = total
 
-    if not results:
+    # Check if all values are 0
+    if all(v == 0 for v in results.values()):
         return None
 
     # Map category keywords to display names
