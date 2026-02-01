@@ -532,6 +532,7 @@ def handle_monthly_category(df, project, question):
             (project_df['Month'] == target_month) &
             (project_df['Sheet_Name'] != 'Financial Status')
         ]
+        st.write(f"DEBUG: ft='{ft}', target_month={target_month}, filtered_len={len(filtered)}")
 
         # Sum all items with the same first 2 digits of Item_Code
         total = 0
@@ -540,11 +541,14 @@ def handle_monthly_category(df, project, question):
             # Check if item_code starts with category_prefix (e.g., "2.2" matches "2.2.1")
             if item_code.startswith(category_prefix + '.') or item_code == category_prefix:
                 total += row['Value']
+                st.write(f"DEBUG: matched item_code={item_code}, value={row['Value']}")
 
+        st.write(f"DEBUG: ft='{ft}', total={total}")
         # Always include all financial types (even if 0)
         results[ft] = total
 
     # Check if all values are 0
+    st.write(f"DEBUG: results={results}, all_zero={all(v == 0 for v in results.values())}")
     if all(v == 0 for v in results.values()):
         return None
 
