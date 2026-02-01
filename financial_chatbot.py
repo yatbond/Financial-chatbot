@@ -441,20 +441,57 @@ else:
 # Get folder structure
 if not st.session_state.available_years:
     with st.spinner("Loading folder structure..."):
+        # First get the folder structure
         year_months, all_months = get_folder_structure(service)
-        st.session_state.available_years = sorted(year_months.keys(), reverse=True)
-        st.session_state.year_months = year_months
-        st.session_state.available_months = sorted(all_months)
         
-        # Pre-select the latest year (first one in the sorted list)
+        # Now check which folders actually have CSV files
+        service = get_drive_service()
+        folders = list_folders(service)
+        
+        # Find the root "Ai Chatbot Knowledge Base" folder
+        root_folder = None
+        for f in folders:
+            if f['name'] == 'Ai Chatbot Knowledge Base':
+                root_folder = f['id']
+                break
+        
+        # Find year folders and check for CSV files
+        year_folders = list_folders(service, root_folder)
+        folders_with_data = {}
+        
+        for year_folder in year_folders:
+            try:
+                year = year_folder['name']
+                month_folders = list_folders(service, year_folder['id'])
+                
+                for m in month_folders:
+                    # Check if this month folder has CSV files
+                    csv_files = service.files().list(
+                        q=f"'{m['id']}' in parents and name contains '_flat.csv' and trashed=false",
+                        fields="files(id)",
+                        pageSize=1
+                    ).execute()
+                    
+                    if csv_files.get('files'):  # Has CSV files
+                        if year not in folders_with_data:
+                            folders_with_data[year] = []
+                        folders_with_data[year].append(m['name'])
+            except:
+                continue
+        
+        # Set available years (only those with data)
+        st.session_state.available_years = sorted(folders_with_data.keys(), reverse=True)
+        st.session_state.year_months = folders_with_data
+        st.session_state.available_months = sorted(set(m for months in folders_with_data.values() for m in months))
+        
+        # Pre-select the latest year that has data
         if st.session_state.available_years:
             st.session_state.default_year = st.session_state.available_years[0]
-            # Get the latest month in that year
+            # Get the latest month that has data
             latest_months = st.session_state.year_months.get(st.session_state.default_year, [])
             if latest_months:
-                # Sort months numerically
                 sorted_months = sorted(latest_months, key=lambda x: int(x))
-                st.session_state.default_month = sorted_months[-1]  # Latest month
+                st.session_state.default_month = sorted_months[-1]
             else:
                 st.session_state.default_month = None
         else:
@@ -468,7 +505,7 @@ if st.session_state.available_years:
     col1, col2 = st.columns(2)
     
     with col1:
-        # Pre-select the latest year
+        # Pre-select the latest year with data
         default_year_idx = 0
         if 'default_year' in st.session_state and st.session_state.default_year:
             try:
@@ -478,14 +515,13 @@ if st.session_state.available_years:
         selected_year = st.selectbox("Year:", st.session_state.available_years, index=default_year_idx)
     
     with col2:
+        # Only show months that have data for the selected year
         available_months = st.session_state.year_months.get(selected_year, [])
-        if not available_months:
-            available_months = st.session_state.available_months
         
         # Sort months numerically for proper ordering
         sorted_months = sorted(available_months, key=lambda x: int(x))
         
-        # Pre-select the latest month
+        # Pre-select the latest month with data
         default_month_idx = len(sorted_months) - 1
         if 'default_month' in st.session_state and st.session_state.default_month:
             try:
