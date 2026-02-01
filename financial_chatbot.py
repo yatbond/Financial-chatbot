@@ -437,7 +437,9 @@ def find_best_matches(df, search_text, project):
 def handle_monthly_category(df, project, question):
     """Handle 'monthly X' queries like 'monthly preliminaries'."""
     project_df = df[df['_project'] == project]
-    question_lower = question.lower()
+    # Expand acronyms first so "monthly prelim" becomes "monthly preliminaries"
+    question_expanded = expand_acronyms(question)
+    question_lower = question_expanded.lower()
 
     # Check if this is a monthly category query
     monthly_keywords = ['monthly']
