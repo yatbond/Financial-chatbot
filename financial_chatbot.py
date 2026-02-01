@@ -544,7 +544,7 @@ if st.session_state.data_loaded and st.session_state.projects:
             st.markdown(f"**Q:** {st.session_state.pending_question}")
             st.markdown("*Multiple matches found. Please select:*")
             
-            for i, match in enumerate(st.session_state.pending_matches[:5]):  # Show top 5
+            for i, match in enumerate(st.session_state.pending_matches[:10]):  # Show top 10
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     st.write(f"• {match['Financial_Type']} → {match['Data_Type']}")
