@@ -478,8 +478,6 @@ def handle_monthly_category(df, project, question):
             category_name = kw
             break
 
-    print(f"DEBUG: is_monthly_query={is_monthly_query}, category_prefix={category_prefix}, category_name={category_name}, question_lower={question_lower}")
-
     if not is_monthly_query or not category_prefix:
         return None
 
