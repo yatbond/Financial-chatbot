@@ -23,6 +23,10 @@ if 'selected_project' not in st.session_state:
     st.session_state.selected_project = None
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
+if 'available_years' not in st.session_state:
+    st.session_state.available_years = []
+if 'available_months' not in st.session_state:
+    st.session_state.available_months = []
 
 def get_drive_service():
     """Get Google Drive service."""
@@ -51,6 +55,53 @@ def get_drive_service():
     except:
         return None
 
+def list_folders(service, parent_id=None):
+    """List folders in Google Drive."""
+    query = "mimeType='application/vnd.google-apps.folder'"
+    if parent_id:
+        query += f" and '{parent_id}' in parents"
+    
+    results = service.files().list(
+        q=query,
+        fields="files(id, name)",
+        pageSize=100
+    ).execute()
+    
+    return results.get('files', [])
+
+def get_folder_structure(service):
+    """Get year/month folder structure from Google Drive."""
+    folders = list_folders(service)
+    
+    # Find the root "Ai Chatbot Knowledge Base" folder
+    root_folder = None
+    for f in folders:
+        if f['name'] == 'Ai Chatbot Knowledge Base':
+            root_folder = f['id']
+            break
+    
+    if not root_folder:
+        return {}, []
+    
+    # List year folders
+    year_folders = list_folders(service, root_folder)
+    year_months = {}
+    all_months = set()
+    
+    for year_folder in year_folders:
+        try:
+            year = year_folder['name']
+            month_folders = list_folders(service, year_folder['id'])
+            months = []
+            for m in month_folders:
+                months.append(m['name'])
+                all_months.add(m['name'])
+            year_months[year] = months
+        except:
+            continue
+    
+    return year_months, sorted(all_months)
+
 def extract_project_info(filename):
     """
     Extract project code and name from filename.
@@ -71,27 +122,52 @@ def extract_project_info(filename):
         return code, project_name
     return None, name
 
-def load_all_csv_files():
-    """Download and combine all CSV files."""
-    service = get_drive_service()
-    if service is None:
-        return None, {}
-    
-    # Find all _flat.csv files
-    results = service.files().list(
-        q="name contains '_flat.csv' and trashed=false",
-        fields="files(id, name)",
-        pageSize=100
-    ).execute()
-    
-    files = results.get('files', [])
-    if not files:
-        return None, {}
-    
+def load_csv_files_for_period(service, selected_year, selected_month):
+    """Load CSV files for selected year and month."""
     all_dfs = []
     projects = {}
     
-    for f in files:
+    # Find the root folder
+    folders = list_folders(service)
+    root_folder = None
+    for f in folders:
+        if f['name'] == 'Ai Chatbot Knowledge Base':
+            root_folder = f['id']
+            break
+    
+    if not root_folder:
+        return None, {}
+    
+    # Find year folder
+    year_folders = list_folders(service, root_folder)
+    year_folder_id = None
+    for f in year_folders:
+        if f['name'] == selected_year:
+            year_folder_id = f['id']
+            break
+    
+    if not year_folder_id:
+        return None, {}
+    
+    # Find month folder
+    month_folders = list_folders(service, year_folder_id)
+    month_folder_id = None
+    for f in month_folders:
+        if f['name'] == selected_month:
+            month_folder_id = f['id']
+            break
+    
+    if not month_folder_id:
+        return None, {}
+    
+    # Find CSV files in month folder
+    csv_files = service.files().list(
+        q=f"'{month_folder_id}' in parents and name contains '_flat.csv' and trashed=false",
+        fields="files(id, name)",
+        pageSize=100
+    ).execute().get('files', [])
+    
+    for f in csv_files:
         try:
             # Download CSV directly
             request = service.files().get_media(fileId=f['id'])
@@ -107,13 +183,15 @@ def load_all_csv_files():
                 project_key = f"{code} - {project_name}"
                 df['_project'] = project_key
                 df['_source_file'] = f['name']
+                df['_year'] = selected_year
+                df['_month'] = selected_month
                 all_dfs.append(df)
                 projects[project_key] = {
                     'code': code,
                     'name': project_name,
                     'filename': f['name']
                 }
-            
+        
         except Exception as e:
             continue
     
@@ -244,7 +322,7 @@ def answer_question(df, project, question):
     
     # Check for year specification
     year_match = re.search(r'202[0-9]', question)
-    target_year = project_df['Year'].max() if year_match is None else int(year_match.group())
+    target_year = project_df['_year'].iloc[0] if year_match is None else int(year_match.group())
     
     # Determine Item_Code: default to '3' (before adjustment) unless specified
     item_code = '3'
@@ -261,7 +339,6 @@ def answer_question(df, project, question):
     filters = {
         'Sheet_Name': 'Financial Status',  # Default to Financial Status sheet
         'Month': target_month,
-        'Year': target_year,
     }
     
     if item_code:
@@ -306,11 +383,34 @@ if service is None:
 else:
     st.success("Connected to Google Drive ✓")
 
-# Load data
-if not st.session_state.data_loaded:
-    if st.button("Load All Projects"):
-        with st.spinner("Loading projects..."):
-            df, projects = load_all_csv_files()
+# Get folder structure
+if not st.session_state.available_years:
+    with st.spinner("Loading folder structure..."):
+        year_months, all_months = get_folder_structure(service)
+        st.session_state.available_years = sorted(year_months.keys(), reverse=True)
+        st.session_state.year_months = year_months
+        st.session_state.available_months = sorted(all_months)
+
+# Year and Month selectors
+if st.session_state.available_years:
+    st.markdown("### 📅 Select Period")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        selected_year = st.selectbox("Year:", st.session_state.available_years)
+    
+    with col2:
+        # Get months for selected year
+        available_months = st.session_state.year_months.get(selected_year, [])
+        if not available_months:
+            available_months = st.session_state.available_months
+        selected_month = st.selectbox("Month:", sorted(available_months))
+    
+    # Load data button
+    if st.button("Load Data"):
+        with st.spinner(f"Loading data for {selected_month} {selected_year}..."):
+            df, projects = load_csv_files_for_period(service, selected_year, selected_month)
             
             if df is not None and len(df) > 0:
                 st.session_state.df = df
@@ -318,16 +418,18 @@ if not st.session_state.data_loaded:
                 st.session_state.projects = projects
                 st.session_state.selected_project = None
                 st.session_state.chat_history = []
+                st.session_state.current_year = selected_year
+                st.session_state.current_month = selected_month
                 st.success(f"✅ Loaded {len(projects)} projects with {len(df):,} records!")
                 st.rerun()
             else:
-                st.error("Could not load data")
+                st.error("No data found for this period")
 
 # Show project selector
 if st.session_state.data_loaded and st.session_state.projects:
     projects = st.session_state.projects
     
-    st.markdown("### 🏗️ Select Project")
+    st.markdown(f"### 🏗️ Select Project ({st.session_state.current_month} {st.session_state.current_year})")
     
     # Create project options
     project_options = ["-- Select a project --"] + sorted(projects.keys())
@@ -397,7 +499,6 @@ if st.session_state.data_loaded and st.session_state.projects:
             project_df = st.session_state.df[st.session_state.df['_project'] == project]
             st.write(f"Total records: {len(project_df)}")
             st.write(f"Sheets: {project_df['Sheet_Name'].unique().tolist()}")
-            st.write(f"Months: {sorted(project_df['Month'].unique())}")
             st.write(f"Financial Types: {project_df['Financial_Type'].unique().tolist()}")
         
         # Show sample data
@@ -407,7 +508,7 @@ if st.session_state.data_loaded and st.session_state.projects:
 # Clear button
 if st.session_state.data_loaded:
     st.markdown("---")
-    if st.button("🔄 Reload All Projects"):
+    if st.button("🔄 Change Period"):
         st.session_state.data_loaded = False
         st.session_state.df = None
         st.session_state.projects = {}
