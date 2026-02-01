@@ -341,11 +341,13 @@ def find_best_matches(df, search_text, project):
     agg_dict = {
         'Value': 'sum',
         'Month': 'first',
+        'Sheet_Name': 'first',  # Keep the actual sheet name
     }
     if roll_col:
         agg_dict[roll_col] = 'min'
 
-    all_combinations = project_df.groupby(['Financial_Type', 'Data_Type', 'Item_Code']).agg(agg_dict).reset_index()
+    # Group by Sheet_Name as well to preserve the actual sheet
+    all_combinations = project_df.groupby(['Sheet_Name', 'Financial_Type', 'Data_Type', 'Item_Code']).agg(agg_dict).reset_index()
 
     matches = []
 
@@ -408,7 +410,7 @@ def find_best_matches(df, search_text, project):
         
         if score > 0:
             match_data = {
-                'Sheet_Name': 'Financial Status',
+                'Sheet_Name': row['Sheet_Name'],
                 'Financial_Type': row['Financial_Type'],
                 'Data_Type': row['Data_Type'],
                 'Value': value,
@@ -629,16 +631,29 @@ if st.session_state.data_loaded and st.session_state.df is not None:
         st.markdown("---")
         st.markdown(f"**Q:** {st.session_state.pending_question}")
         st.markdown("*Multiple matches found. Please select:*")
-        
+
         for i, match in enumerate(st.session_state.pending_matches[:10]):
-            col1, col2 = st.columns([4, 1])
             roll_num = match.get('Roll')
             if roll_num is not None:
-                match_label = f"Financial Status → {match['Financial_Type']} → {match['Data_Type']} → Item:{match['Item_Code']} → {selected_year}/{match['Month']} → ${match['Value']:,.0f} (roll {roll_num})"
+                match_label = f"{match['Sheet_Name']} → {match['Financial_Type']} → {match['Data_Type']} → Item:{match['Item_Code']} → {selected_year}/{match['Month']} → ${match['Value']:,.0f} (roll {roll_num})"
             else:
-                match_label = f"Financial Status → {match['Financial_Type']} → {match['Data_Type']} → Item:{match['Item_Code']} → {selected_year}/{match['Month']} → ${match['Value']:,.0f}"
+                match_label = f"{match['Sheet_Name']} → {match['Financial_Type']} → {match['Data_Type']} → Item:{match['Item_Code']} → {selected_year}/{match['Month']} → ${match['Value']:,.0f}"
+
+            with st.expander(f"{i+1}. {match_label}"):
+                # Show raw data for this match
+                raw_data = df[
+                    (df['Sheet_Name'] == match['Sheet_Name']) &
+                    (df['Financial_Type'] == match['Financial_Type']) &
+                    (df['Data_Type'] == match['Data_Type']) &
+                    (df['Item_Code'] == match['Item_Code']) &
+                    (df['Month'] == match['Month'])
+                ]
+                st.dataframe(raw_data, use_container_width=True)
+
+            # Select button in same row
+            col1, col2 = st.columns([4, 1])
             with col1:
-                st.write(f"{i+1}. {match_label}")
+                st.write(f"**{i+1}.** {match_label}")
             with col2:
                 if st.button(f"Select", key=f"select_{i}"):
                     response, _ = answer_question(df, project, st.session_state.pending_question, selected_filters=match)
@@ -659,7 +674,7 @@ if st.session_state.data_loaded and st.session_state.df is not None:
                         st.session_state.pending_question = None
                         st.session_state.pending_matches = []
                         st.rerun()
-        
+
         if st.button("Clear Selection"):
             st.session_state.pending_question = None
             st.session_state.pending_matches = []
