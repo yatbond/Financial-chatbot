@@ -25,6 +25,12 @@ ACRONYMS = {
     'labor': 'manpower (labour)',
     'cashflow': 'cash flow',
     'cash': 'cash flow',
+    'prelim': 'preliminaries',
+    'preliminary': 'preliminaries',
+    'material': 'materials',
+    'plant': 'plant and machinery',
+    'machinery': 'plant and machinery',
+    'lab': 'labour',
 }
 
 def expand_acronyms(text):
@@ -437,11 +443,15 @@ def handle_monthly_category(df, project, question):
     monthly_keywords = ['monthly']
     category_keywords = {
         'preliminaries': '2.1',
+        'preliminary': '2.1',
         'materials': '2.2',
+        'material': '2.2',
+        'plant and machinery': '2.3',
         'plant': '2.3',
         'machinery': '2.3',
         'labour': '2.4',
         'labor': '2.4',
+        'lab': '2.4',
         'subcontractor': '2.5',
         'subcon': '2.5',
         'staff': '2.6',
@@ -450,6 +460,7 @@ def handle_monthly_category(df, project, question):
         'insurance': '2.8',
         'bond': '2.9',
         'others': '2.10',
+        'other': '2.10',
         'contingency': '2.11',
     }
 
@@ -511,16 +522,33 @@ def handle_monthly_category(df, project, question):
     if not results:
         return None
 
-    # Format response
-    category_display = category_name.title()
-    response = f"## Monthly {category_display} ({target_month}/{st.session_state.current_year}) ('000)\n\n"
+    # Map category keywords to display names
+    category_display_names = {
+        'preliminaries': 'Preliminaries',
+        'materials': 'Materials',
+        'plant': 'Plant & Machinery',
+        'machinery': 'Plant & Machinery',
+        'labour': 'Labour',
+        'labor': 'Labour',
+        'subcon': 'Subcontractor',
+        'subcontractor': 'Subcontractor',
+        'staff': 'Staff',
+        'admin': 'Admin Cost',
+        'administration': 'Admin Cost',
+        'insurance': 'Insurance',
+        'bond': 'Bond',
+        'others': 'Others',
+        'contingency': 'Contingency',
+    }
+
+    # Format response - no total, just individual values
+    display_name = category_display_names.get(category_name, category_name.title())
+    response = f"## Monthly {display_name} ({target_month}/{st.session_state.current_year}) ('000)\n\n"
 
     for ft, value in results.items():
         response += f"- **{ft}:** ${value:,.0f}\n"
 
-    total_all = sum(results.values())
-    response += f"\n**Total: ${total_all:,.0f}**\n"
-    response += f"\n*Category: {category_prefix}.x (items with same first 2 digits)*"
+    response += f"\n*Items with Item_Code starting with {category_prefix}.*"
 
     return response, []
 
@@ -712,7 +740,7 @@ if st.session_state.data_loaded and st.session_state.df is not None:
     
     # Chatbot
     st.markdown("### 💬 Ask about this Project ('000)")
-    st.caption("💡 Shortcuts: GP=Gross Profit, NP=Net Profit, Subcon=Subcontractor, Rebar=Reinforcement, Cashflow=Cash Flow")
+    st.caption("💡 Shortcuts: GP=Gross Profit, NP=Net Profit, Subcon=Subcontractor, Rebar=Reinforcement, Cashflow=Cash Flow, Prelim=Preliminaries")
 
     with st.form("chat_form"):
         user_question = st.text_input("Your question:", placeholder="e.g., What is the NP? or What is the Projected GP?")
