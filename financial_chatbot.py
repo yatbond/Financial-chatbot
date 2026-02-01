@@ -517,17 +517,11 @@ def handle_monthly_category(df, project, question):
                 target_month = i + 1
                 break
 
-    # If no month specified, find the latest month that has data for this category
+    # If no month specified, use the currently selected report month
     if target_month is None:
-        # Find latest month with data for this category (across all financial types)
-        all_category_data = project_df[
-            (project_df['Sheet_Name'] != 'Financial Status') &
-            (project_df['Item_Code'].astype(str).str.startswith(category_prefix + '.'))
-        ]
-        if not all_category_data.empty:
-            target_month = all_category_data['Month'].max()
-        else:
-            target_month = project_df['Month'].max()
+        # Use the selected month from the report
+        target_month = st.session_state.current_month
+        st.write(f"DEBUG: Using selected report month: {target_month}")
 
     # Financial types to check (excluding Financial Status which has all months)
     financial_types = ['Projection', 'Committed Cost', 'Accrual', 'Cash Flow']
@@ -560,13 +554,20 @@ def handle_monthly_category(df, project, question):
     st.write(f"DEBUG: Using target_month={target_month} for category_prefix={category_prefix}")
     st.write(f"DEBUG: results={results}, all_zero={all(v == 0 for v in results.values())}")
     if all(v == 0 for v in results.values()):
-        return None
+        # Show which financial types have data (even if 0)
+        response = f"## Monthly {display_name} ({target_month}/{st.session_state.current_year}) ('000)\n\n"
+        response += "*No data found for this category in the selected month.*\n"
+        for ft, value in results.items():
+            response += f"- **{ft}:** $0\n"
+        response += f"\n*Items with Item_Code starting with {category_prefix}.*"
+        return response, []
 
     # Map category keywords to display names
     category_display_names = {
         'preliminaries': 'Preliminaries',
         'materials': 'Materials',
         'plant': 'Plant & Machinery',
+        'plant and machinery': 'Plant & Machinery',
         'machinery': 'Plant & Machinery',
         'labour': 'Labour',
         'labor': 'Labour',
