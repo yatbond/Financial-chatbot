@@ -428,18 +428,50 @@ def find_best_matches(df, search_text, project):
     matches.sort(key=lambda x: (x['score'], x['matched_count']), reverse=True)
     return matches
 
-def answer_question(df, project, question, selected_filters=None):
-    """Answer a user question."""
+def handle_monthly_category(df, project, question):
+    """Handle 'monthly X' queries like 'monthly preliminaries'."""
     project_df = df[df['_project'] == project]
     question_lower = question.lower()
-    
-    latest_month = project_df['Month'].max()
-    target_month = latest_month
-    
+
+    # Check if this is a monthly category query
+    monthly_keywords = ['monthly']
+    category_keywords = {
+        'preliminaries': '2.1',
+        'materials': '2.2',
+        'plant': '2.3',
+        'machinery': '2.3',
+        'labour': '2.4',
+        'labor': '2.4',
+        'subcontractor': '2.5',
+        'subcon': '2.5',
+        'staff': '2.6',
+        'admin': '2.7',
+        'administration': '2.7',
+        'insurance': '2.8',
+        'bond': '2.9',
+        'others': '2.10',
+        'contingency': '2.11',
+    }
+
+    # Check if user is asking about monthly category
+    is_monthly_query = any(kw in question_lower for kw in monthly_keywords)
+    category_prefix = None
+
+    for kw, prefix in category_keywords.items():
+        if kw in question_lower:
+            category_prefix = prefix
+            category_name = kw
+            break
+
+    if not is_monthly_query or not category_prefix:
+        return None
+
+    # Determine target month
     month_names = ['january', 'february', 'march', 'april', 'may', 'june',
                    'july', 'august', 'september', 'october', 'november', 'december']
     month_abbr = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
-    
+
+    target_month = None
     for i, m in enumerate(month_names):
         if m in question_lower:
             target_month = i + 1
@@ -449,7 +481,76 @@ def answer_question(df, project, question, selected_filters=None):
             if m in question_lower:
                 target_month = i + 1
                 break
-    
+
+    # If no month specified, find latest month in the data
+    if target_month is None:
+        target_month = project_df['Month'].max()
+
+    # Financial types to check (excluding Financial Status which has all months)
+    financial_types = ['Projection', 'Committed Cost', 'Accrual', 'Cash Flow']
+
+    results = {}
+    for ft in financial_types:
+        # Filter by financial type and month (use individual worksheets, not Financial Status)
+        filtered = project_df[
+            (project_df['Financial_Type'] == ft) &
+            (project_df['Month'] == target_month) &
+            (project_df['Sheet_Name'] != 'Financial Status')
+        ]
+
+        # Sum all items with the same first 2 digits of Item_Code
+        total = 0
+        for _, row in filtered.iterrows():
+            item_code = str(row['Item_Code'])
+            if item_code.startswith(category_prefix):
+                total += row['Value']
+
+        if total != 0:
+            results[ft] = total
+
+    if not results:
+        return None
+
+    # Format response
+    category_display = category_name.title()
+    response = f"## Monthly {category_display} ({target_month}/{st.session_state.current_year}) ('000)\n\n"
+
+    for ft, value in results.items():
+        response += f"- **{ft}:** ${value:,.0f}\n"
+
+    total_all = sum(results.values())
+    response += f"\n**Total: ${total_all:,.0f}**\n"
+    response += f"\n*Category: {category_prefix}.x (items with same first 2 digits)*"
+
+    return response, []
+
+def answer_question(df, project, question, selected_filters=None):
+    """Answer a user question."""
+    project_df = df[df['_project'] == project]
+    question_lower = question.lower()
+
+    # Check for monthly category query first
+    monthly_result = handle_monthly_category(df, project, question)
+    if monthly_result:
+        return monthly_result
+
+    latest_month = project_df['Month'].max()
+    target_month = latest_month
+
+    month_names = ['january', 'february', 'march', 'april', 'may', 'june',
+                   'july', 'august', 'september', 'october', 'november', 'december']
+    month_abbr = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+
+    for i, m in enumerate(month_names):
+        if m in question_lower:
+            target_month = i + 1
+            break
+    else:
+        for i, m in enumerate(month_abbr):
+            if m in question_lower:
+                target_month = i + 1
+                break
+
     if selected_filters:
         ft_match = selected_filters.get('Financial_Type')
         dt_match = selected_filters.get('Data_Type')
