@@ -529,11 +529,10 @@ def handle_monthly_category(df, project, question):
 
     results = {}
     for ft in financial_types:
-        # Filter by financial type and month (use individual worksheets, not Financial Status)
+        # Filter by Sheet_Name (not Financial_Type) since Sheet_Name matches the report type
         filtered = project_df[
-            (project_df['Financial_Type'] == ft) &
-            (project_df['Month'] == target_month) &
-            (project_df['Sheet_Name'] != 'Financial Status')
+            (project_df['Sheet_Name'] == ft) &
+            (project_df['Month'] == target_month)
         ]
 
         # Sum all items with the same first 2 digits of Item_Code
@@ -546,7 +545,7 @@ def handle_monthly_category(df, project, question):
                 matched_count += 1
 
         results[ft] = total
-        st.write(f"DEBUG: ft='{ft}', total={total}, matched_count={matched_count}")
+        st.write(f"DEBUG: ft='{ft}', total={total}, matched_count={matched_count}, filtered_len={len(filtered)}")
 
     st.write(f"DEBUG: target_month={target_month}, category_prefix={category_prefix}")
 
