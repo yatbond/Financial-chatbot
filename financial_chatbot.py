@@ -450,14 +450,26 @@ if st.session_state.available_years:
     st.session_state.current_year = selected_year
     st.session_state.current_month = selected_month
     
+    # Debug: Show all loaded projects
+    with st.expander(f"Debug: All loaded projects ({len(st.session_state.project_list)})", expanded=False):
+        for f, info in st.session_state.project_list.items():
+            st.write(f"{info['year']}/{info['month']}: {info['code']} - {info['name']}")
+    
     # Show projects in this period (fast - just file names)
     projects_in_period = {}
     for filename, info in st.session_state.project_list.items():
         if info['year'] == selected_year and info['month'] == selected_month:
             projects_in_period[filename] = info
     
+    st.markdown(f"### 🏗️ Projects in {selected_month}/{selected_year}")
+    st.caption(f"Found {len(projects_in_period)} projects")
+    
+    # Debug: Show all projects in project_list
+    with st.expander(f"Debug: All projects in period ({len(projects_in_period)})", expanded=False):
+        for f, info in projects_in_period.items():
+            st.write(f"{info['code']} - {info['name']}: {f}")
+    
     if projects_in_period:
-        st.markdown(f"### 🏗️ Projects in {selected_month}/{selected_year} ({len(projects_in_period)} projects)")
         
         # Sort by numeric code
         sorted_files = sorted(projects_in_period.keys(), 
