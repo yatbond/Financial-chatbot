@@ -351,6 +351,27 @@ def find_best_matches(df, search_text, project):
             if words_found == total_query_words:
                 score += 30  # Bonus for finding all words
         
+        # KNOWLEDGE BASE BOOST: Check if user previously selected this match
+        if hasattr(st.session_state, 'query_knowledge_base') and st.session_state.query_knowledge_base:
+            normalized_q = search_lower.strip()
+            
+            # First check exact match
+            if normalized_q in st.session_state.query_knowledge_base:
+                saved_match = st.session_state.query_knowledge_base[normalized_q]
+                if (saved_match.get('Financial_Type') == row['Financial_Type'] and
+                    saved_match.get('Data_Type') == row['Data_Type'] and
+                    saved_match.get('Item_Code') == item_code):
+                    score += 100  # Major boost for previously selected match!
+            
+            # Also check if any saved query is contained in current query
+            # This handles variations like "projected net profit" vs "net profit projection"
+            for saved_q, saved_match in st.session_state.query_knowledge_base.items():
+                if saved_q in normalized_q or normalized_q in saved_q:
+                    if (saved_match.get('Financial_Type') == row['Financial_Type'] and
+                        saved_match.get('Data_Type') == row['Data_Type'] and
+                        saved_match.get('Item_Code') == item_code):
+                        score += 80  # Boost for similar query
+        
         if score > 0:
             matches.append({
                 'Sheet_Name': 'Financial Status',
@@ -652,8 +673,9 @@ if st.session_state.data_loaded and st.session_state.projects:
                                 "q": st.session_state.pending_question, 
                                 "a": response
                             })
-                            # Save to knowledge base
-                            st.session_state.query_knowledge_base[st.session_state.pending_question] = match
+                            # Save to knowledge base (normalize query for matching)
+                            normalized_q = st.session_state.pending_question.lower().strip()
+                            st.session_state.query_knowledge_base[normalized_q] = match
                             st.session_state.pending_question = None
                             st.session_state.pending_matches = []
                             st.rerun()
