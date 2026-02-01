@@ -1,11 +1,10 @@
 """
 Financial Chatbot - Streamlit Web App
-Accesses Google Drive via API for financial data
+Reads preprocessed CSV files from Google Drive
 """
 import streamlit as st
 import pandas as pd
 import json
-from io import BytesIO
 
 st.set_page_config(page_title="Financial Chatbot", page_icon="📊")
 
@@ -47,52 +46,36 @@ def get_drive_service():
         st.write(f"Error: {e}")
         return None
 
-def find_and_load_data():
-    """Find and load data."""
+def find_csv_files():
+    """Find preprocessed CSV files."""
     service = get_drive_service()
     if service is None:
-        return None, "No service"
+        return [], "No service"
     
-    # Search for Excel files (.xlsx) - NOT Google Sheets
-    all_files = []
-    
-    # Search by name containing "Financial Report" and ending with .xlsx
+    # Search for _flat.csv files
     results = service.files().list(
-        q="name contains 'Financial Report' and name endsWith '.xlsx' and trashed=false",
+        q="name contains '_flat.csv' and trashed=false",
         fields="files(id, name)",
         pageSize=50
     ).execute()
     
     files = results.get('files', [])
-    for f in files:
-        all_files.append(f)
-    
-    return all_files, len(all_files)
+    return files, len(files)
 
-def load_excel_from_gdrive(file_id, file_name):
-    """Load a single Excel file from Google Drive."""
+def load_csv_from_gdrive(file_id):
+    """Load a CSV file from Google Drive."""
     service = get_drive_service()
     if service is None:
         return None
     
-    # Export as Excel format
-    request = service.files().export_media(
-        fileId=file_id,
-        mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
+    # Download as CSV
+    request = service.files().get_media(fileId=file_id)
     content = request.execute()
     
-    # Parse all sheets
-    excel_file = pd.ExcelFile(BytesIO(content))
-    all_sheets = {}
-    
-    for sheet_name in excel_file.sheet_names:
-        df = pd.read_excel(excel_file, sheet_name=sheet_name)
-        df['_source_file'] = file_name
-        df['_source_sheet'] = sheet_name
-        all_sheets[sheet_name] = df
-    
-    return all_sheets
+    # Parse CSV
+    from io import StringIO
+    df = pd.read_csv(StringIO(content.decode('utf-8')))
+    return df
 
 # Load credentials and test connection
 service = get_drive_service()
@@ -106,14 +89,14 @@ else:
     st.success("Connected to Google Drive ✓")
 
 # Load data button
-if st.button("Load Financial Data"):
-    with st.spinner("Searching for files..."):
-        files, count = find_and_load_data()
+if st.button("Load Financial Data from CSV"):
+    with st.spinner("Searching for CSV files..."):
+        files, count = find_csv_files()
         
         if count == 0:
-            st.error("No Excel files found!")
+            st.error("No CSV files found! Make sure _flat.csv files are in Google Drive.")
         else:
-            st.success(f"Found {count} Excel files!")
+            st.success(f"Found {count} CSV files!")
             
             all_dfs = []
             
@@ -122,12 +105,9 @@ if st.button("Load Financial Data"):
                 
                 for i, f in enumerate(files):
                     try:
-                        sheets = load_excel_from_gdrive(f['id'], f['name'])
-                        for sheet_name, df in sheets.items():
-                            df['_source_file'] = f['name']
-                            df['_source_sheet'] = sheet_name
-                            all_dfs.append(df)
-                        
+                        df = load_csv_from_gdrive(f['id'])
+                        df['_source_file'] = f['name']
+                        all_dfs.append(df)
                         st.session_state.loaded_files.append(f['name'])
                     except Exception as e:
                         st.write(f"Error loading {f['name']}: {e}")
@@ -141,7 +121,7 @@ if st.button("Load Financial Data"):
                 st.success(f"Loaded {len(combined)} records from {len(files)} files!")
                 st.rerun()
             else:
-                st.error("No data could be parsed")
+                st.error("No data could be loaded")
 
 # Show loaded data
 if st.session_state.data_loaded and st.session_state.df is not None:
@@ -156,12 +136,42 @@ if st.session_state.data_loaded and st.session_state.df is not None:
     # Show summary
     st.markdown("### 📈 Data Summary")
     
-    # Try to show useful columns
-    for col in ['_source_sheet', 'Year', 'Month', 'Sheet_Name']:
-        if col in df.columns:
-            unique_vals = df[col].unique()
-            if len(unique_vals) <= 20:
-                st.write(f"{col}: {list(unique_vals)}")
+    # Show columns
+    st.write(f"Columns: {list(df.columns)}")
+    
+    # Show data by sheet
+    if 'Sheet_Name' in df.columns:
+        st.write(f"\nSheets: {df['Sheet_Name'].unique().tolist()}")
+    
+    # Show data by year/month
+    if 'Year' in df.columns:
+        st.write(f"Years: {sorted(df['Year'].unique())}")
+    if 'Month' in df.columns:
+        st.write(f"Months: {sorted(df['Month'].unique())}")
+    
+    # Calculate key metrics
+    st.markdown("### 💰 Key Metrics")
+    
+    # Projected Gross Profit
+    proj = df[df['Sheet_Name'] == 'Projection']
+    if not proj.empty and 'Trade' in proj.columns:
+        gp = proj[proj['Trade'].str.contains('Gross Profit', case=False, na=False)]
+        if not gp.empty:
+            st.metric("Projected Gross Profit", f"${gp['Value'].sum():,.2f}")
+    
+    # WIP Gross Profit
+    wip = df[(df['Sheet_Name'] == 'Financial Status') & (df['Financial_Type'] == 'Audit Report (WIP) J')]
+    if not wip.empty and 'Trade' in wip.columns:
+        gp = wip[wip['Trade'].str.contains('Gross Profit', case=False, na=False)]
+        if not gp.empty:
+            st.metric("WIP Gross Profit", f"${gp['Value'].sum():,.2f}")
+    
+    # Cash Flow
+    cf = df[df['Sheet_Name'] == 'Cash Flow']
+    if not cf.empty and 'Trade' in cf.columns:
+        gp = cf[cf['Trade'].str.contains('Gross Profit', case=False, na=False)]
+        if not gp.empty:
+            st.metric("Cash Flow", f"${gp['Value'].sum():,.2f}")
     
     # Show sample
     with st.expander("Sample Data", expanded=False):
@@ -176,12 +186,6 @@ if st.session_state.data_loaded and st.session_state.df is not None:
         "text/csv",
         key='download-csv'
     )
-
-# Show loaded files
-if st.session_state.loaded_files:
-    with st.expander("Loaded Files"):
-        for f in st.session_state.loaded_files:
-            st.write(f"✓ {f}")
 
 # Clear data button
 if st.session_state.data_loaded:
