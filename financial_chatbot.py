@@ -6,7 +6,7 @@ Provides query functions for financial data.
 
 import os
 import pandas as pd
-from financial_preprocessor import preprocess_folder, load_all_data, METADATA_FILE, DEFAULT_DATA_ROOT, GDRIVE_SOURCE
+from financial_preprocessor import preprocess_folder, load_all_data, METADATA_FILE, DEFAULT_DATA_ROOT
 
 # In-memory cache
 _data_cache = None
